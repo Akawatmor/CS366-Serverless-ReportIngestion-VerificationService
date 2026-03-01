@@ -1,0 +1,23 @@
+# === Example terraform.tfvars ===
+# Copy to terraform.tfvars and fill in values
+
+project_name    = "report-verify"
+environment     = "dev"
+aws_region      = "us-east-1"
+
+# Gemini AI — get from Google AI Studio
+gemini_api_key  = "YOUR_GEMINI_API_KEY_HERE"
+gemini_model    = "gemini-2.0-flash"
+
+# Lambda config
+lambda_memory_size    = 256
+lambda_timeout_api    = 30
+lambda_timeout_worker = 60
+
+# Trust scoring thresholds
+trust_auto_reject   = 30
+trust_high_priority = 80
+
+# SQS
+sqs_visibility_timeout = 90
+sqs_max_receive_count  = 3
