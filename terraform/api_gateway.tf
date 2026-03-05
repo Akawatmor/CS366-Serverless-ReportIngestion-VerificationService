@@ -227,6 +227,20 @@ resource "aws_api_gateway_deployment" "api" {
     ]))
   }
 
+  depends_on = [
+    aws_api_gateway_integration.post_reports,
+    aws_api_gateway_integration.get_reports,
+    aws_api_gateway_integration.get_stats,
+    aws_api_gateway_integration.get_report_detail,
+    aws_api_gateway_integration.patch_report,
+    aws_api_gateway_integration.delete_report,
+    aws_api_gateway_integration.get_health,
+    module.cors_reports,
+    module.cors_report_by_id,
+    module.cors_stats,
+    module.cors_health,
+  ]
+
   lifecycle {
     create_before_destroy = true
   }

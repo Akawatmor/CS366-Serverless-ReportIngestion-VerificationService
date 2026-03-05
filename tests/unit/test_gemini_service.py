@@ -1,5 +1,7 @@
 """
 Unit tests for src/services/gemini_service.py
+
+Tests the GeminiService class with multi-key rotation and model fallback.
 """
 import json
 import pytest
@@ -12,7 +14,15 @@ class TestGeminiService:
     """Tests for Gemini AI trust scoring service."""
 
     def setup_method(self):
-        self.service = GeminiService(api_key="test-key")
+        """Create a fresh GeminiService with test keys configured via env."""
+        with patch.dict("os.environ", {
+            "GEMINI_API_KEY1": "test-key-1",
+            "GEMINI_API_KEY2": "test-key-2",
+        }):
+            from src.config import Config
+            test_config = Config()
+            with patch("src.services.gemini_service.config", test_config):
+                self.service = GeminiService()
 
     def test_fallback_result_structure(self):
         """Fallback result should have all required fields."""
@@ -21,11 +31,12 @@ class TestGeminiService:
         assert result["suggested_category"] == "OTHER"
         assert isinstance(result["keywords"], list)
         assert result["ai_analysis_failed"] is True
+        assert result["is_spam_likely"] is False
+        assert "reasoning" in result
 
     @patch("src.services.gemini_service.genai", create=True)
     def test_analyze_report_success(self, mock_genai):
         """Successful Gemini analysis should return parsed JSON."""
-        # Mock the Gemini response
         mock_response = MagicMock()
         mock_response.text = json.dumps({
             "trust_score": 85,
@@ -35,9 +46,7 @@ class TestGeminiService:
             "is_spam_likely": False,
         })
 
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value = mock_response
-        self.service._client = mock_model
+        self.service._call_gemini = MagicMock(return_value=mock_response.text)
 
         result = self.service.analyze_report(
             content="Fire at Central World!",
@@ -55,9 +64,9 @@ class TestGeminiService:
 
     def test_analyze_report_failure_returns_fallback(self):
         """When Gemini fails, should return fallback values."""
-        # Force an error by setting invalid client
-        self.service._client = MagicMock()
-        self.service._client.generate_content.side_effect = Exception("API Error")
+        self.service._call_gemini = MagicMock(
+            side_effect=RuntimeError("All keys exhausted")
+        )
 
         result = self.service.analyze_report(content="Test content")
 
@@ -66,11 +75,7 @@ class TestGeminiService:
 
     def test_analyze_report_invalid_json_returns_fallback(self):
         """When Gemini returns non-JSON, should return fallback."""
-        mock_response = MagicMock()
-        mock_response.text = "This is not JSON"
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value = mock_response
-        self.service._client = mock_model
+        self.service._call_gemini = MagicMock(return_value="This is not JSON")
 
         result = self.service.analyze_report(content="Test content")
 
@@ -79,20 +84,82 @@ class TestGeminiService:
 
     def test_health_check_success(self):
         """Health check returns healthy when API responds."""
+        mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.text = "OK"
-        mock_model = MagicMock()
-        mock_model.generate_content.return_value = mock_response
-        self.service._client = mock_model
+        mock_client.generate_content.return_value = mock_response
+        self.service._get_client = MagicMock(return_value=mock_client)
 
         result = self.service.health_check()
         assert result["status"] == "healthy"
+        assert "model" in result
+        assert "available_keys" in result
 
     def test_health_check_failure(self):
         """Health check returns unhealthy when API fails."""
-        mock_model = MagicMock()
-        mock_model.generate_content.side_effect = Exception("Connection error")
-        self.service._client = mock_model
+        mock_client = MagicMock()
+        mock_client.generate_content.side_effect = Exception("Connection error")
+        self.service._get_client = MagicMock(return_value=mock_client)
 
         result = self.service.health_check()
         assert result["status"] == "unhealthy"
+
+    def test_rotate_key(self):
+        """Key rotation should cycle through available keys."""
+        self.service._api_keys = ["key1", "key2", "key3"]
+        self.service._current_key_idx = 0
+        self.service._blocked_keys = set()
+
+        result = self.service._rotate_key()
+        assert result is True
+        assert self.service._current_key_idx == 1
+
+    def test_rotate_key_all_exhausted(self):
+        """When all keys are blocked, rotation should fail."""
+        self.service._api_keys = ["key1", "key2"]
+        self.service._current_key_idx = 0
+        self.service._blocked_keys = set()
+
+        self.service._rotate_key()
+        result = self.service._rotate_key()
+        assert result is False
+
+    def test_advance_model(self):
+        """Model fallback should advance to next model."""
+        self.service._model_chain = ["model-A", "model-B", "model-C"]
+        self.service._current_model_idx = 0
+        self.service._blocked_keys = {0, 1}
+
+        result = self.service._advance_model()
+        assert result is True
+        assert self.service._current_model_idx == 1
+        assert self.service._blocked_keys == set()
+
+    def test_advance_model_all_exhausted(self):
+        """When all models used, advance should fail."""
+        self.service._model_chain = ["model-A"]
+        self.service._current_model_idx = 0
+
+        result = self.service._advance_model()
+        assert result is False
+
+    def test_is_rate_limited(self):
+        """Should detect 429 rate limit errors."""
+        assert self.service._is_rate_limited(Exception("429 RESOURCE_EXHAUSTED"))
+        assert self.service._is_rate_limited(Exception("rate limit exceeded"))
+        assert not self.service._is_rate_limited(Exception("500 Internal Server Error"))
+
+    def test_is_model_not_found(self):
+        """Should detect model-not-found errors."""
+        assert self.service._is_model_not_found(Exception("404 model not found"))
+        assert self.service._is_model_not_found(Exception("models/gemini-X is not found"))
+        assert not self.service._is_model_not_found(Exception("network timeout"))
+
+    def test_no_keys_returns_fallback(self):
+        """With no API keys, analyze_report returns fallback."""
+        self.service._api_keys = []
+        with patch("src.services.gemini_service.config") as mock_config:
+            mock_config.GEMINI_API_KEY = ""
+            result = self.service.analyze_report(content="test")
+        assert result["ai_analysis_failed"] is True
+        assert result["trust_score"] == 50

@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard — Report Verification API Tester</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #0f172a;
+            --accent: #f59e0b;
+            --bg: #f1f5f9;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --text: #334155;
+            --text-light: #64748b;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --info: #3b82f6;
+            --code-bg: #1e293b;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
+
+        /* Navbar */
+        .navbar {
+            background: var(--secondary);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .navbar-brand {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-weight: 700; font-size: 1.1rem;
+            text-decoration: none; color: white;
+        }
+        .navbar-links { display: flex; gap: 1rem; align-items: center; }
+        .navbar-links a {
+            color: rgba(255,255,255,0.7);
+            text-decoration: none;
+            font-size: 0.85rem;
+            padding: 0.35rem 0.75rem;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .navbar-links a:hover { color: white; background: rgba(255,255,255,0.1); }
+        .navbar-links a.active { color: var(--accent); }
+
+        /* Layout */
+        .layout {
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            min-height: calc(100vh - 52px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--card-bg);
+            border-right: 1px solid var(--border);
+            padding: 1rem 0;
+            overflow-y: auto;
+        }
+        .sidebar-section {
+            padding: 0.5rem 1rem;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--text-light);
+            letter-spacing: 0.05em;
+        }
+        .sidebar-item {
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.6rem 1rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            border-left: 3px solid transparent;
+            transition: all 0.15s;
+        }
+        .sidebar-item:hover { background: #f1f5f9; }
+        .sidebar-item.active { background: #eff6ff; border-left-color: var(--primary); color: var(--primary); font-weight: 600; }
+        .sidebar-method {
+            display: inline-block; width: 50px; font-size: 0.65rem;
+            font-weight: 700; text-align: center; padding: 0.15rem 0;
+            border-radius: 3px; color: white;
+        }
+        .sidebar-method.GET { background: var(--success); }
+        .sidebar-method.POST { background: var(--info); }
+        .sidebar-method.PATCH { background: var(--warning); color: var(--secondary); }
+        .sidebar-method.DELETE { background: var(--danger); }
+
+        /* Main Panel */
+        .main-panel {
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+
+        /* Config Panel */
+        .config-panel {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+        .config-title { font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+        .config-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem; align-items: end; }
+        .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
+        .form-label { font-size: 0.75rem; font-weight: 600; color: var(--text-light); }
+        .form-input {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-family: 'Consolas', 'Monaco', monospace;
+            transition: border-color 0.2s;
+        }
+        .form-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+        .btn-save {
+            padding: 0.5rem 1rem;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+        .btn-save:hover { background: var(--primary-dark); }
+
+        /* API Panel */
+        .api-panel { display: none; }
+        .api-panel.active { display: block; }
+
+        .panel-header {
+            display: flex; align-items: center; gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+        .panel-title { font-size: 1.25rem; font-weight: 700; }
+        .panel-desc { color: var(--text-light); font-size: 0.9rem; margin-bottom: 1.5rem; }
+
+        /* Request Builder */
+        .request-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            margin-bottom: 1rem;
+            overflow: hidden;
+        }
+        .request-header {
+            display: flex; align-items: center; gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: #f8fafc;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.85rem;
+        }
+        .request-url {
+            flex: 1;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.85rem;
+            color: var(--text);
+        }
+        .btn-send {
+            padding: 0.5rem 1.25rem;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.85rem;
+            display: flex; align-items: center; gap: 0.35rem;
+        }
+        .btn-send:hover { background: var(--primary-dark); }
+        .btn-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Form Fields */
+        .request-body { padding: 1rem; }
+        .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+        .field-full { grid-column: 1 / -1; }
+
+        .form-input-sm {
+            width: 100%;
+            padding: 0.45rem 0.65rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            transition: border-color 0.2s;
+        }
+        .form-input-sm:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+
+        select.form-input-sm {
+            appearance: auto;
+            background: white;
+        }
+
+        textarea.form-input-sm {
+            font-family: 'Consolas', 'Monaco', monospace;
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-label-sm {
+            display: block;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--text-light);
+            margin-bottom: 0.2rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .form-hint {
+            font-size: 0.72rem;
+            color: var(--text-light);
+            margin-top: 0.15rem;
+        }
+
+        /* Response Panel */
+        .response-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .response-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0.75rem 1rem;
+            background: #f8fafc;
+            border-bottom: 1px solid var(--border);
+        }
+        .response-status {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-weight: 700; font-size: 0.85rem;
+        }
+        .status-code {
+            display: inline-block; padding: 0.2rem 0.5rem;
+            border-radius: 4px; font-size: 0.8rem; color: white;
+        }
+        .status-2xx { background: var(--success); }
+        .status-4xx { background: var(--warning); color: var(--secondary); }
+        .status-5xx { background: var(--danger); }
+        .response-meta { font-size: 0.8rem; color: var(--text-light); }
+        .response-body {
+            padding: 1rem;
+            background: var(--code-bg);
+            color: #e2e8f0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.82rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 500px;
+            overflow-y: auto;
+            line-height: 1.5;
+        }
+        .response-empty {
+            padding: 2rem;
+            text-align: center;
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+
+        /* Stats Cards */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+        .stat-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.25rem;
+            text-align: center;
+        }
+        .stat-value { font-size: 2rem; font-weight: 800; color: var(--primary); }
+        .stat-label { font-size: 0.8rem; color: var(--text-light); margin-top: 0.25rem; }
+
+        /* Reports List */
+        .report-item {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 1rem;
+            align-items: center;
+        }
+        .report-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); border-color: var(--primary); }
+        .report-content { font-size: 0.9rem; font-weight: 500; }
+        .report-meta { font-size: 0.8rem; color: var(--text-light); }
+        .report-score {
+            font-weight: 800; font-size: 1.1rem;
+            width: 45px; height: 45px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 50%; color: white;
+        }
+        .score-high { background: var(--success); }
+        .score-mid { background: var(--warning); color: var(--secondary); }
+        .score-low { background: var(--danger); }
+        .report-status {
+            font-size: 0.75rem; font-weight: 700;
+            padding: 0.25rem 0.6rem; border-radius: 20px;
+        }
+        .status-PENDING_REVIEW { background: #fef3c7; color: #92400e; }
+        .status-VERIFIED { background: #d1fae5; color: #065f46; }
+        .status-SPAM { background: #fee2e2; color: #991b1b; }
+        .status-REJECTED { background: #fce7f3; color: #9d174d; }
+        .status-DUPLICATE { background: #e0e7ff; color: #3730a3; }
+        .status-RECEIVED { background: #e2e8f0; color: #475569; }
+        .status-DELETED { background: #f1f5f9; color: #94a3b8; }
+
+        /* Health Components */
+        .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+        .health-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem;
+            display: flex; align-items: center; gap: 0.75rem;
+        }
+        .health-dot {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .health-dot.healthy { background: var(--success); }
+        .health-dot.degraded { background: var(--warning); }
+        .health-dot.unhealthy { background: var(--danger); }
+        .health-name { font-weight: 600; font-size: 0.9rem; }
+        .health-detail { font-size: 0.8rem; color: var(--text-light); }
+
+        /* Notification */
+        .toast {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            padding: 0.75rem 1.25rem;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.85rem;
+            font-weight: 600;
+            z-index: 1000;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s;
+        }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { background: var(--success); }
+        .toast.error { background: var(--danger); }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .layout { grid-template-columns: 1fr; }
+            .sidebar { display: none; }
+            .config-row { grid-template-columns: 1fr; }
+            .field-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+    <a href="/" class="navbar-brand">&#9881; Report Verify &mdash; Dashboard</a>
+    <div class="navbar-links">
+        <a href="/">Home</a>
+        <a href="/dashboard/" class="active">Dashboard</a>
+        <a href="https://github.com/Akawatmor/CS366-Serverless-ReportIngestion-VerificationService" target="_blank">GitHub</a>
+    </div>
+</nav>
+
+<div class="layout">
+
+<!-- Sidebar -->
+<aside class="sidebar">
+    <div class="sidebar-section">Configuration</div>
+    <div class="sidebar-item active" onclick="showPanel('config')">&#9881; API Settings</div>
+
+    <div class="sidebar-section">API Endpoints</div>
+    <div class="sidebar-item" onclick="showPanel('health')">
+        <span class="sidebar-method GET">GET</span> /health
+    </div>
+    <div class="sidebar-item" onclick="showPanel('ingest')">
+        <span class="sidebar-method POST">POST</span> /reports
+    </div>
+    <div class="sidebar-item" onclick="showPanel('list')">
+        <span class="sidebar-method GET">GET</span> /reports
+    </div>
+    <div class="sidebar-item" onclick="showPanel('detail')">
+        <span class="sidebar-method GET">GET</span> /reports/{id}
+    </div>
+    <div class="sidebar-item" onclick="showPanel('verify')">
+        <span class="sidebar-method PATCH">PATCH</span> /reports/{id}
+    </div>
+    <div class="sidebar-item" onclick="showPanel('delete')">
+        <span class="sidebar-method DELETE">DELETE</span> /reports/{id}
+    </div>
+    <div class="sidebar-item" onclick="showPanel('stats')">
+        <span class="sidebar-method GET">GET</span> /reports/stats
+    </div>
+
+    <div class="sidebar-section">Quick Actions</div>
+    <div class="sidebar-item" onclick="showPanel('overview')">&#128202; Live Overview</div>
+</aside>
+
+<!-- Main Panel -->
+<main class="main-panel">
+
+    <!-- ==================== CONFIG PANEL ==================== -->
+    <div class="api-panel active" id="panel-config">
+        <div class="config-panel">
+            <div class="config-title">&#128272; API Configuration</div>
+            <p style="font-size:0.85rem;color:var(--text-light);margin-bottom:1rem;">
+                Set your API Gateway URL and API Key. These are saved in localStorage.
+                <br>Run <code>terraform output api_url</code> and <code>terraform output -raw api_key</code> to get values.
+            </p>
+            <div class="config-row">
+                <div class="form-group">
+                    <label class="form-label">API Base URL (e.g. https://xxx.execute-api.us-east-1.amazonaws.com/dev/v1)</label>
+                    <input type="text" class="form-input" id="cfg-url" placeholder="https://abc123.execute-api.us-east-1.amazonaws.com/dev/v1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">API Key (X-Api-Key)</label>
+                    <input type="password" class="form-input" id="cfg-key" placeholder="Your API Key from terraform output">
+                </div>
+                <button class="btn-save" onclick="saveConfig()">Save</button>
+            </div>
+        </div>
+        <div class="config-panel">
+            <div class="config-title">&#128214; Quick Guide</div>
+            <div style="font-size:0.85rem;color:var(--text-light);line-height:1.8;">
+                <p><strong>1. Deploy:</strong> Run <code>./scripts/deploy.sh</code> to deploy the infrastructure.</p>
+                <p><strong>2. Get URL:</strong> Copy the <code>api_url</code> output and paste above.</p>
+                <p><strong>3. Get Key:</strong> Run <code>terraform output -raw api_key</code> and paste above.</p>
+                <p><strong>4. Test:</strong> Use the sidebar to test each endpoint interactively.</p>
+                <p style="margin-top:0.5rem;"><strong>Endpoints:</strong></p>
+                <ul style="margin-left:1.5rem;">
+                    <li><code>GET /health</code> — Check system status (no auth required)</li>
+                    <li><code>POST /reports</code> — Submit a disaster report</li>
+                    <li><code>GET /reports?status=PENDING_REVIEW</code> — List reports</li>
+                    <li><code>GET /reports/{id}</code> — Get report details</li>
+                    <li><code>PATCH /reports/{id}</code> — Verify/reject a report</li>
+                    <li><code>DELETE /reports/{id}</code> — Soft delete a report</li>
+                    <li><code>GET /reports/stats</code> — Dashboard statistics</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== HEALTH CHECK ==================== -->
+    <div class="api-panel" id="panel-health">
+        <div class="panel-header">
+            <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
+            <span class="panel-title">/health</span>
+        </div>
+        <p class="panel-desc">Check service health — DynamoDB, SQS, Gemini AI, EventBridge. No auth required.</p>
+
+        <div id="health-components"></div>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method GET">GET</span>
+                <span class="request-url" id="health-url">/health</span>
+                <button class="btn-send" onclick="sendHealth()">&#9654; Send</button>
+            </div>
+        </div>
+        <div class="response-card">
+            <div class="response-header">
+                <div class="response-status" id="health-status">Response</div>
+                <div class="response-meta" id="health-meta"></div>
+            </div>
+            <div id="health-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== INGEST (POST /reports) ==================== -->
+    <div class="api-panel" id="panel-ingest">
+        <div class="panel-header">
+            <span class="sidebar-method POST" style="font-size:0.8rem;">POST</span>
+            <span class="panel-title">/reports</span>
+        </div>
+        <p class="panel-desc">Submit a raw disaster report. Returns 202 Accepted with report_id. Reports are processed asynchronously via SQS.</p>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method POST">POST</span>
+                <span class="request-url">/reports</span>
+                <button class="btn-send" onclick="sendIngest()">&#9654; Send</button>
+            </div>
+            <div class="request-body">
+                <div class="field-grid">
+                    <div>
+                        <label class="form-label-sm">Reporter Source</label>
+                        <select class="form-input-sm" id="ingest-source">
+                            <option value="TWITTER">TWITTER</option>
+                            <option value="FACEBOOK">FACEBOOK</option>
+                            <option value="LINE">LINE</option>
+                            <option value="OFFICIAL_APP">OFFICIAL_APP</option>
+                            <option value="IOT_SENSOR">IOT_SENSOR</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Reporter ID</label>
+                        <input type="text" class="form-input-sm" id="ingest-reporter" placeholder="@user123" value="@test_user">
+                    </div>
+                    <div class="field-full">
+                        <label class="form-label-sm">Raw Content</label>
+                        <textarea class="form-input-sm" id="ingest-content" rows="3" placeholder="Disaster report text...">ไฟไหม้ร้านทอง เยาวราช ตอนนี้เลย! ควันดำลอยมาเห็นจากไกล #BKKFire</textarea>
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Latitude</label>
+                        <input type="number" class="form-input-sm" id="ingest-lat" step="any" value="13.746123" placeholder="13.746">
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Longitude</label>
+                        <input type="number" class="form-input-sm" id="ingest-lon" step="any" value="100.539123" placeholder="100.539">
+                    </div>
+                    <div class="field-full">
+                        <label class="form-label-sm">Media URLs (comma-separated)</label>
+                        <input type="text" class="form-input-sm" id="ingest-media" placeholder="https://img.host/fire123.jpg, https://video.host/clip.mp4">
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Event Timestamp (optional)</label>
+                        <input type="datetime-local" class="form-input-sm" id="ingest-timestamp">
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Source External ID (optional, for idempotency)</label>
+                        <input type="text" class="form-input-sm" id="ingest-extid" placeholder="tweet-123456789">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="response-card">
+            <div class="response-header">
+                <div class="response-status" id="ingest-status">Response</div>
+                <div class="response-meta" id="ingest-meta"></div>
+            </div>
+            <div id="ingest-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== LIST REPORTS (GET /reports) ==================== -->
+    <div class="api-panel" id="panel-list">
+        <div class="panel-header">
+            <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
+            <span class="panel-title">/reports</span>
+        </div>
+        <p class="panel-desc">List disaster reports with filters (status, trust score, pagination). Uses GSI: gsi_status_ingested.</p>
+
+        <div id="list-reports-container"></div>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method GET">GET</span>
+                <span class="request-url">/reports</span>
+                <button class="btn-send" onclick="sendList()">&#9654; Send</button>
+            </div>
+            <div class="request-body">
+                <div class="field-grid">
+                    <div>
+                        <label class="form-label-sm">Status</label>
+                        <select class="form-input-sm" id="list-status">
+                            <option value="PENDING_REVIEW">PENDING_REVIEW</option>
+                            <option value="RECEIVED">RECEIVED</option>
+                            <option value="VERIFIED">VERIFIED</option>
+                            <option value="SPAM">SPAM</option>
+                            <option value="REJECTED">REJECTED</option>
+                            <option value="DUPLICATE">DUPLICATE</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Min Trust Score</label>
+                        <input type="number" class="form-input-sm" id="list-score" min="0" max="100" placeholder="0" value="">
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Limit</label>
+                        <input type="number" class="form-input-sm" id="list-limit" min="1" max="100" value="10">
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Last Evaluated Key (pagination)</label>
+                        <input type="text" class="form-input-sm" id="list-next" placeholder="Paste next_token here">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="response-card">
+            <div class="response-header">
+                <div class="response-status" id="list-status-resp">Response</div>
+                <div class="response-meta" id="list-meta"></div>
+            </div>
+            <div id="list-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== GET DETAIL (GET /reports/{id}) ==================== -->
+    <div class="api-panel" id="panel-detail">
+        <div class="panel-header">
+            <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
+            <span class="panel-title">/reports/{report_id}</span>
+        </div>
+        <p class="panel-desc">Get detailed information about a specific report including AI analysis, metadata, and verification status.</p>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method GET">GET</span>
+                <span class="request-url">/reports/{report_id}</span>
+                <button class="btn-send" onclick="sendDetail()">&#9654; Send</button>
+            </div>
+            <div class="request-body">
+                <div class="form-group">
+                    <label class="form-label-sm">Report ID (UUID)</label>
+                    <input type="text" class="form-input-sm" id="detail-id" placeholder="r-550e8400-e29b-41d4-a716-446655440000">
+                    <div class="form-hint">Paste a report_id from POST or LIST response</div>
+                </div>
+            </div>
+        </div>
+        <div class="response-card">
+            <div class="response-header">
+                <div class="response-status" id="detail-status">Response</div>
+                <div class="response-meta" id="detail-meta"></div>
+            </div>
+            <div id="detail-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== VERIFY (PATCH /reports/{id}) ==================== -->
+    <div class="api-panel" id="panel-verify">
+        <div class="panel-header">
+            <span class="sidebar-method PATCH" style="font-size:0.8rem;">PATCH</span>
+            <span class="panel-title">/reports/{report_id}</span>
+        </div>
+        <p class="panel-desc">Verify or reject a report. Uses Optimistic Locking (ConditionExpression). VERIFIED triggers EventBridge event.</p>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method PATCH">PATCH</span>
+                <span class="request-url">/reports/{report_id}</span>
+                <button class="btn-send" onclick="sendVerify()">&#9654; Send</button>
+            </div>
+            <div class="request-body">
+                <div class="field-grid">
+                    <div class="field-full">
+                        <label class="form-label-sm">Report ID (UUID)</label>
+                        <input type="text" class="form-input-sm" id="verify-id" placeholder="r-550e8400-e29b-41d4-a716-446655440000">
+                    </div>
+                    <div>
+                        <label class="form-label-sm">New Status</label>
+                        <select class="form-input-sm" id="verify-status">
+                            <option value="VERIFIED">VERIFIED</option>
+                            <option value="SPAM">SPAM</option>
+                            <option value="REJECTED">REJECTED</option>
+                            <option value="DUPLICATE">DUPLICATE</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Reviewer ID</label>
+                        <input type="text" class="form-input-sm" id="verify-reviewer" value="officer_007" placeholder="officer_007">
+                    </div>
+                    <div class="field-full">
+                        <label class="form-label-sm">Reviewer Notes (optional)</label>
+                        <input type="text" class="form-input-sm" id="verify-notes" placeholder="Confirmed via CCTV feed.">
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Link to Incident ID (optional, for merge)</label>
+                        <input type="text" class="form-input-sm" id="verify-incident" placeholder="inc-1234-5678">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="response-card">
+            <div class="response-header">
+                <div class="response-status" id="verify-status-resp">Response</div>
+                <div class="response-meta" id="verify-meta"></div>
+            </div>
+            <div id="verify-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== DELETE (DELETE /reports/{id}) ==================== -->
+    <div class="api-panel" id="panel-delete">
+        <div class="panel-header">
+            <span class="sidebar-method DELETE" style="font-size:0.8rem;">DELETE</span>
+            <span class="panel-title">/reports/{report_id}</span>
+        </div>
+        <p class="panel-desc">Soft delete a report (changes status to DELETED). Audit logged. Requires reason and deleted_by.</p>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method DELETE">DELETE</span>
+                <span class="request-url">/reports/{report_id}</span>
+                <button class="btn-send" onclick="sendDelete()">&#9654; Send</button>
+            </div>
+            <div class="request-body">
+                <div class="field-grid">
+                    <div class="field-full">
+                        <label class="form-label-sm">Report ID (UUID)</label>
+                        <input type="text" class="form-input-sm" id="delete-id" placeholder="r-550e8400-e29b-41d4-a716-446655440000">
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Reason (Required)</label>
+                        <input type="text" class="form-input-sm" id="delete-reason" value="Contains sensitive PII data" placeholder="Reason for deletion">
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Deleted By (Required)</label>
+                        <input type="text" class="form-input-sm" id="delete-by" value="admin_001" placeholder="admin_001">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="response-card">
+            <div class="response-header">
+                <div class="response-status" id="delete-status">Response</div>
+                <div class="response-meta" id="delete-meta"></div>
+            </div>
+            <div id="delete-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== STATS (GET /reports/stats) ==================== -->
+    <div class="api-panel" id="panel-stats">
+        <div class="panel-header">
+            <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
+            <span class="panel-title">/reports/stats</span>
+        </div>
+        <p class="panel-desc">Dashboard summary statistics using Atomic Counter Table. Reads pre-aggregated data for millisecond response times.</p>
+
+        <div id="stats-cards"></div>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method GET">GET</span>
+                <span class="request-url">/reports/stats</span>
+                <button class="btn-send" onclick="sendStats()">&#9654; Send</button>
+            </div>
+            <div class="request-body">
+                <div class="field-grid">
+                    <div>
+                        <label class="form-label-sm">Timeframe</label>
+                        <select class="form-input-sm" id="stats-timeframe">
+                            <option value="today">Today</option>
+                            <option value="last_24h">Last 24 Hours</option>
+                            <option value="last_7d">Last 7 Days</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="response-card">
+            <div class="response-header">
+                <div class="response-status" id="stats-status">Response</div>
+                <div class="response-meta" id="stats-meta"></div>
+            </div>
+            <div id="stats-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== LIVE OVERVIEW ==================== -->
+    <div class="api-panel" id="panel-overview">
+        <div class="panel-header">
+            <span class="panel-title">&#128202; Live Overview</span>
+        </div>
+        <p class="panel-desc">One-click: Load health, stats, and pending reports at once.</p>
+
+        <button class="btn-send" style="margin-bottom:1.5rem;" onclick="loadOverview()">&#9654; Load Overview</button>
+
+        <div id="overview-health" style="margin-bottom:1.5rem;"></div>
+        <div id="overview-stats" style="margin-bottom:1.5rem;"></div>
+
+        <h3 style="margin-bottom:0.75rem;font-size:1rem;">Pending Reports</h3>
+        <div id="overview-reports"></div>
+
+        <div class="response-card" style="margin-top:1rem;">
+            <div class="response-header">
+                <div class="response-status">Raw Responses</div>
+            </div>
+            <div id="overview-response" class="response-empty">Click "Load Overview" to fetch data</div>
+        </div>
+    </div>
+
+</main>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// =========================================
+// Configuration
+// =========================================
+const CONFIG = {
+    baseUrl: localStorage.getItem('api_base_url') || '',
+    apiKey: localStorage.getItem('api_key') || ''
+};
+
+// Init config fields
+document.getElementById('cfg-url').value = CONFIG.baseUrl;
+document.getElementById('cfg-key').value = CONFIG.apiKey;
+
+function saveConfig() {
+    CONFIG.baseUrl = document.getElementById('cfg-url').value.replace(/\/+$/, '');
+    CONFIG.apiKey = document.getElementById('cfg-key').value;
+    localStorage.setItem('api_base_url', CONFIG.baseUrl);
+    localStorage.setItem('api_key', CONFIG.apiKey);
+    showToast('Configuration saved!', 'success');
+}
+
+// =========================================
+// Panel Navigation
+// =========================================
+function showPanel(name) {
+    document.querySelectorAll('.api-panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
+    document.getElementById(`panel-${name}`).classList.add('active');
+    event.currentTarget.classList.add('active');
+}
+
+// =========================================
+// Toast Notification
+// =========================================
+function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `toast ${type} show`;
+    setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// =========================================
+// API Request Helper
+// =========================================
+async function apiRequest(method, path, body = null) {
+    if (!CONFIG.baseUrl && !path.includes('/health')) {
+        showToast('Please configure API URL first', 'error');
+        throw new Error('API URL not configured');
+    }
+
+    const url = `${CONFIG.baseUrl}${path}`;
+    const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+    };
+
+    if (CONFIG.apiKey) {
+        headers['X-Api-Key'] = CONFIG.apiKey;
+    }
+
+    const opts = { method, headers };
+    if (body) opts.body = JSON.stringify(body);
+
+    const start = performance.now();
+    const resp = await fetch(url, opts);
+    const elapsed = Math.round(performance.now() - start);
+
+    let data;
+    try { data = await resp.json(); } catch { data = null; }
+
+    return { status: resp.status, data, elapsed };
+}
+
+function updateResponseUI(prefix, result) {
+    const statusEl = document.getElementById(`${prefix}-status`);
+    const metaEl = document.getElementById(`${prefix}-meta`);
+    const bodyEl = document.getElementById(`${prefix}-response`);
+
+    // Status code color
+    const codeClass = result.status < 300 ? 'status-2xx' : result.status < 500 ? 'status-4xx' : 'status-5xx';
+    statusEl.innerHTML = `<span class="status-code ${codeClass}">${result.status}</span> Response`;
+    metaEl.textContent = `${result.elapsed}ms`;
+
+    // Body
+    bodyEl.className = 'response-body';
+    bodyEl.textContent = result.data ? JSON.stringify(result.data, null, 2) : '(empty)';
+}
+
+// =========================================
+// Health Check
+// =========================================
+async function sendHealth() {
+    try {
+        const r = await apiRequest('GET', '/health');
+        updateResponseUI('health', r);
+
+        // Render health cards
+        if (r.data && r.data.components) {
+            renderHealthCards('health-components', r.data.components);
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function renderHealthCards(containerId, components) {
+    const c = document.getElementById(containerId);
+    c.innerHTML = '<div class="health-grid">' +
+        Object.entries(components).map(([name, info]) => {
+            const status = info.status || 'unknown';
+            return `<div class="health-card">
+                <div class="health-dot ${status}"></div>
+                <div>
+                    <div class="health-name">${name}</div>
+                    <div class="health-detail">${status}</div>
+                </div>
+            </div>`;
+        }).join('') + '</div>';
+}
+
+// =========================================
+// Ingest Report
+// =========================================
+async function sendIngest() {
+    const body = {
+        reporter_source: document.getElementById('ingest-source').value,
+        reporter_id: document.getElementById('ingest-reporter').value,
+        raw_content: document.getElementById('ingest-content').value,
+    };
+
+    const lat = document.getElementById('ingest-lat').value;
+    const lon = document.getElementById('ingest-lon').value;
+    if (lat && lon) {
+        body.geo_location = { lat: parseFloat(lat), lon: parseFloat(lon) };
+    }
+
+    const media = document.getElementById('ingest-media').value;
+    if (media) {
+        body.media_urls = media.split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    const ts = document.getElementById('ingest-timestamp').value;
+    if (ts) body.timestamp = new Date(ts).toISOString();
+
+    const extId = document.getElementById('ingest-extid').value;
+    if (extId) body.source_external_id = extId;
+
+    try {
+        const r = await apiRequest('POST', '/reports', body);
+        updateResponseUI('ingest', r);
+        if (r.status < 300 && r.data && r.data.report_id) {
+            showToast(`Report created: ${r.data.report_id}`, 'success');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// =========================================
+// List Reports
+// =========================================
+async function sendList() {
+    const params = new URLSearchParams();
+    const status = document.getElementById('list-status').value;
+    if (status) params.set('status', status);
+
+    const score = document.getElementById('list-score').value;
+    if (score) params.set('min_trust_score', score);
+
+    const limit = document.getElementById('list-limit').value;
+    if (limit) params.set('limit', limit);
+
+    const next = document.getElementById('list-next').value;
+    if (next) params.set('last_evaluated_key', next);
+
+    try {
+        const r = await apiRequest('GET', `/reports?${params.toString()}`);
+        updateResponseUI('list-status', { status: r.status, data: r.data, elapsed: r.elapsed });
+        document.getElementById('list-meta').textContent = `${r.elapsed}ms`;
+
+        // Fix: use correct IDs
+        const statusEl = document.getElementById('list-status-resp');
+        const codeClass = r.status < 300 ? 'status-2xx' : r.status < 500 ? 'status-4xx' : 'status-5xx';
+        statusEl.innerHTML = `<span class="status-code ${codeClass}">${r.status}</span> Response`;
+        document.getElementById('list-response').className = 'response-body';
+        document.getElementById('list-response').textContent = r.data ? JSON.stringify(r.data, null, 2) : '(empty)';
+
+        // Render report cards
+        if (r.data && r.data.data) {
+            renderReportList('list-reports-container', r.data.data);
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function renderReportList(containerId, reports) {
+    const c = document.getElementById(containerId);
+    if (!reports || reports.length === 0) {
+        c.innerHTML = '<p style="color:var(--text-light);font-size:0.9rem;margin-bottom:1rem;">No reports found</p>';
+        return;
+    }
+    c.innerHTML = reports.map(r => {
+        const score = r.trust_score || 0;
+        const scoreClass = score >= 70 ? 'score-high' : score >= 30 ? 'score-mid' : 'score-low';
+        const status = r.validation_status || r.status || 'UNKNOWN';
+        return `<div class="report-item" onclick="loadReportDetail('${r.report_id}')">
+            <div>
+                <div class="report-content">${escapeHtml(r.content || r.raw_content || r.report_id)}</div>
+                <div class="report-meta">${r.report_id} · ${r.time_ago || r.ingested_at || ''}</div>
+            </div>
+            <span class="report-status status-${status}">${status}</span>
+            <div class="report-score ${scoreClass}">${score}</div>
+        </div>`;
+    }).join('');
+}
+
+function loadReportDetail(id) {
+    document.getElementById('detail-id').value = id;
+    document.querySelectorAll('.sidebar-item')[4].click(); // Switch to detail panel
+    sendDetail();
+}
+
+// =========================================
+// Get Detail
+// =========================================
+async function sendDetail() {
+    const id = document.getElementById('detail-id').value;
+    if (!id) { showToast('Please enter a Report ID', 'error'); return; }
+
+    try {
+        const r = await apiRequest('GET', `/reports/${id}`);
+        updateResponseUI('detail', r);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// =========================================
+// Verify Report
+// =========================================
+async function sendVerify() {
+    const id = document.getElementById('verify-id').value;
+    if (!id) { showToast('Please enter a Report ID', 'error'); return; }
+
+    const body = {
+        validation_status: document.getElementById('verify-status').value,
+        reviewer_id: document.getElementById('verify-reviewer').value,
+    };
+
+    const notes = document.getElementById('verify-notes').value;
+    if (notes) body.reviewer_notes = notes;
+
+    const incident = document.getElementById('verify-incident').value;
+    if (incident) body.link_to_incident_id = incident;
+
+    try {
+        const r = await apiRequest('PATCH', `/reports/${id}`, body);
+        updateResponseUI('verify-status', { status: r.status, data: r.data, elapsed: r.elapsed });
+        document.getElementById('verify-meta').textContent = `${r.elapsed}ms`;
+
+        const statusEl = document.getElementById('verify-status-resp');
+        const codeClass = r.status < 300 ? 'status-2xx' : r.status < 500 ? 'status-4xx' : 'status-5xx';
+        statusEl.innerHTML = `<span class="status-code ${codeClass}">${r.status}</span> Response`;
+        document.getElementById('verify-response').className = 'response-body';
+        document.getElementById('verify-response').textContent = r.data ? JSON.stringify(r.data, null, 2) : '(empty)';
+
+        if (r.status < 300) {
+            showToast(`Report ${body.validation_status}: ${id}`, 'success');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// =========================================
+// Delete Report
+// =========================================
+async function sendDelete() {
+    const id = document.getElementById('delete-id').value;
+    if (!id) { showToast('Please enter a Report ID', 'error'); return; }
+
+    const body = {
+        reason: document.getElementById('delete-reason').value,
+        deleted_by: document.getElementById('delete-by').value,
+    };
+
+    try {
+        const r = await apiRequest('DELETE', `/reports/${id}`, body);
+        updateResponseUI('delete', r);
+        if (r.status < 300) {
+            showToast(`Report deleted: ${id}`, 'success');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// =========================================
+// Stats
+// =========================================
+async function sendStats() {
+    const tf = document.getElementById('stats-timeframe').value;
+
+    try {
+        const r = await apiRequest('GET', `/reports/stats?timeframe=${tf}`);
+        updateResponseUI('stats', r);
+
+        // Render stat cards
+        if (r.data && r.data.summary) {
+            const s = r.data.summary;
+            document.getElementById('stats-cards').innerHTML = `<div class="stats-grid">
+                <div class="stat-card"><div class="stat-value">${s.total_received_today || 0}</div><div class="stat-label">Total Received</div></div>
+                <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${s.pending_review || 0}</div><div class="stat-label">Pending Review</div></div>
+                <div class="stat-card"><div class="stat-value" style="color:var(--success)">${s.verified_incidents || 0}</div><div class="stat-label">Verified</div></div>
+                <div class="stat-card"><div class="stat-value" style="color:var(--danger)">${s.spam_rejected || 0}</div><div class="stat-label">Spam / Rejected</div></div>
+            </div>`;
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// =========================================
+// Live Overview
+// =========================================
+async function loadOverview() {
+    const overviewResp = document.getElementById('overview-response');
+    overviewResp.className = 'response-body';
+    overviewResp.textContent = 'Loading...';
+
+    const results = {};
+
+    try {
+        // Health
+        const h = await apiRequest('GET', '/health');
+        results.health = h.data;
+        if (h.data && h.data.components) {
+            renderHealthCards('overview-health', h.data.components);
+        }
+    } catch(e) { results.health = { error: e.message }; }
+
+    try {
+        // Stats
+        const s = await apiRequest('GET', '/reports/stats?timeframe=today');
+        results.stats = s.data;
+        if (s.data && s.data.summary) {
+            const sum = s.data.summary;
+            document.getElementById('overview-stats').innerHTML = `<div class="stats-grid">
+                <div class="stat-card"><div class="stat-value">${sum.total_received_today || 0}</div><div class="stat-label">Total Received</div></div>
+                <div class="stat-card"><div class="stat-value" style="color:var(--warning)">${sum.pending_review || 0}</div><div class="stat-label">Pending</div></div>
+                <div class="stat-card"><div class="stat-value" style="color:var(--success)">${sum.verified_incidents || 0}</div><div class="stat-label">Verified</div></div>
+                <div class="stat-card"><div class="stat-value" style="color:var(--danger)">${sum.spam_rejected || 0}</div><div class="stat-label">Spam/Rejected</div></div>
+            </div>`;
+        }
+    } catch(e) { results.stats = { error: e.message }; }
+
+    try {
+        // Pending reports
+        const r = await apiRequest('GET', '/reports?status=PENDING_REVIEW&limit=5');
+        results.reports = r.data;
+        if (r.data && r.data.data) {
+            renderReportList('overview-reports', r.data.data);
+        }
+    } catch(e) { results.reports = { error: e.message }; }
+
+    overviewResp.textContent = JSON.stringify(results, null, 2);
+}
+
+// =========================================
+// Utility
+// =========================================
+function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+}
+</script>
+
+</body>
+</html>

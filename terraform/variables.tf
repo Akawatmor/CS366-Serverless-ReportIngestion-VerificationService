@@ -20,18 +20,38 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-# --- Gemini AI ---
-variable "gemini_api_key" {
-  description = "Google Gemini API key for trust scoring"
+# --- Gemini AI (multi-key rotation + model fallback) ---
+variable "gemini_api_key1" {
+  description = "Primary Gemini API key"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "gemini_api_key2" {
+  description = "Secondary Gemini API key"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "gemini_api_key3" {
+  description = "Tertiary Gemini API key (optional)"
   type        = string
   sensitive   = true
   default     = ""
 }
 
 variable "gemini_model" {
-  description = "Gemini model name"
+  description = "Default Gemini model"
   type        = string
-  default     = "gemini-2.0-flash"
+  default     = "gemini-2.5-flash-lite"
+}
+
+variable "gemini_model_fallbacks" {
+  description = "Comma-separated model fallback chain"
+  type        = string
+  default     = "gemini-2.5-flash-lite,gemini-2.0-flash,gemini-3.1-flash-lite"
 }
 
 # --- Lambda ---

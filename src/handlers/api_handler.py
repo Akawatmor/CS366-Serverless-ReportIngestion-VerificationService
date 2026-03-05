@@ -133,15 +133,18 @@ def _handle_list_reports(query_params: dict, dynamodb) -> dict:
             filter_expr = "trust_score >= :min_score"
             expr_values[":min_score"] = {"N": str(min_score)}
 
-        resp = dynamodb.query(
-            TableName=config.REPORTS_TABLE,
-            IndexName="gsi_status_ingested",
-            KeyConditionExpression="validation_status = :status",
-            ExpressionAttributeValues=expr_values,
-            FilterExpression=filter_expr,
-            ScanIndexForward=False,  # newest first
-            Limit=limit,
-        )
+        query_kwargs: dict[str, Any] = {
+            "TableName": config.REPORTS_TABLE,
+            "IndexName": "gsi_status_ingested",
+            "KeyConditionExpression": "validation_status = :status",
+            "ExpressionAttributeValues": expr_values,
+            "ScanIndexForward": False,  # newest first
+            "Limit": limit,
+        }
+        if filter_expr is not None:
+            query_kwargs["FilterExpression"] = filter_expr
+
+        resp = dynamodb.query(**query_kwargs)
 
         items = resp.get("Items", [])
         reports = [Report.from_dynamodb_item(item).to_api_summary() for item in items]

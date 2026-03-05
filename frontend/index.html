@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report Ingestion & Verification Service</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #0f172a;
+            --accent: #f59e0b;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --text: #334155;
+            --text-light: #64748b;
+            --success: #10b981;
+            --danger: #ef4444;
+            --info: #3b82f6;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        /* Hero Section */
+        .hero {
+            background: linear-gradient(135deg, var(--secondary) 0%, #1e3a5f 50%, var(--primary) 100%);
+            color: white;
+            padding: 4rem 2rem;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+            opacity: 0.5;
+        }
+
+        .hero-content { position: relative; max-width: 800px; margin: 0 auto; }
+        .hero h1 { font-size: 2.5rem; margin-bottom: 0.5rem; font-weight: 800; }
+        .hero .subtitle { font-size: 1.1rem; opacity: 0.9; margin-bottom: 1rem; }
+        .hero .version { display: inline-block; background: rgba(255,255,255,0.15); padding: 0.25rem 0.75rem; border-radius: 20px; font-size: 0.85rem; margin-bottom: 1.5rem; }
+
+        .hero-badges { display: flex; justify-content: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 2rem; }
+        .badge {
+            display: inline-flex; align-items: center; gap: 0.35rem;
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            padding: 0.35rem 0.75rem; border-radius: 6px; font-size: 0.8rem;
+        }
+        .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+
+        .hero-actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+        .btn {
+            display: inline-flex; align-items: center; gap: 0.5rem;
+            padding: 0.75rem 1.5rem; border-radius: 8px; font-size: 0.95rem;
+            text-decoration: none; font-weight: 600; transition: all 0.2s;
+            border: none; cursor: pointer;
+        }
+        .btn-primary { background: var(--accent); color: var(--secondary); }
+        .btn-primary:hover { background: #d97706; transform: translateY(-1px); }
+        .btn-outline { background: transparent; color: white; border: 2px solid rgba(255,255,255,0.4); }
+        .btn-outline:hover { border-color: white; background: rgba(255,255,255,0.1); }
+
+        /* Main Container */
+        .container { max-width: 1100px; margin: 0 auto; padding: 2rem; }
+
+        /* Status Banner */
+        .status-banner {
+            background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 12px; padding: 1.25rem 1.5rem;
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;
+        }
+        .status-left { display: flex; align-items: center; gap: 0.75rem; }
+        .status-indicator {
+            width: 12px; height: 12px; border-radius: 50%;
+            background: var(--text-light); animation: pulse 2s infinite;
+        }
+        .status-indicator.online { background: var(--success); }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .status-text { font-weight: 600; }
+        .status-sub { font-size: 0.85rem; color: var(--text-light); }
+        #check-health-btn {
+            background: var(--primary); color: white; padding: 0.5rem 1rem;
+            border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+        }
+        #check-health-btn:hover { background: var(--primary-dark); }
+
+        /* Section Titles */
+        .section-title {
+            font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem;
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .section-desc { color: var(--text-light); margin-bottom: 1.5rem; }
+
+        /* Feature Grid */
+        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem; margin-bottom: 3rem; }
+        .feature-card {
+            background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 12px; padding: 1.5rem;
+            transition: box-shadow 0.2s, transform 0.2s;
+        }
+        .feature-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); transform: translateY(-2px); }
+        .feature-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+        .feature-card h3 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+        .feature-card p { color: var(--text-light); font-size: 0.9rem; }
+
+        /* API Endpoints Table */
+        .endpoints-section { margin-bottom: 3rem; }
+        .endpoint-table { width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+        .endpoint-table thead { background: var(--secondary); color: white; }
+        .endpoint-table th, .endpoint-table td { padding: 0.85rem 1rem; text-align: left; }
+        .endpoint-table tbody tr { border-bottom: 1px solid var(--border); }
+        .endpoint-table tbody tr:hover { background: #f1f5f9; }
+        .method-badge {
+            display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px;
+            font-size: 0.75rem; font-weight: 700; color: white; min-width: 55px; text-align: center;
+        }
+        .method-GET { background: var(--success); }
+        .method-POST { background: var(--info); }
+        .method-PATCH { background: var(--accent); color: var(--secondary); }
+        .method-DELETE { background: var(--danger); }
+
+        /* Architecture */
+        .arch-section { margin-bottom: 3rem; }
+        .arch-flow {
+            background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 12px; padding: 2rem; text-align: center;
+        }
+        .arch-steps { display: flex; align-items: center; justify-content: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        .arch-step {
+            background: var(--primary); color: white; padding: 0.6rem 1rem;
+            border-radius: 8px; font-size: 0.85rem; font-weight: 600; white-space: nowrap;
+        }
+        .arch-step.aws { background: #ff9900; color: var(--secondary); }
+        .arch-step.external { background: #4285f4; }
+        .arch-arrow { font-size: 1.2rem; color: var(--text-light); }
+        .arch-note { color: var(--text-light); font-size: 0.85rem; }
+
+        /* Tech Stack */
+        .tech-section { margin-bottom: 3rem; }
+        .tech-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+        .tech-card {
+            background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 10px; padding: 1rem 1.25rem;
+            display: flex; align-items: center; gap: 0.75rem;
+        }
+        .tech-logo { font-size: 1.5rem; }
+        .tech-name { font-weight: 600; font-size: 0.9rem; }
+        .tech-desc { font-size: 0.8rem; color: var(--text-light); }
+
+        /* Footer */
+        .footer {
+            background: var(--secondary); color: rgba(255,255,255,0.7);
+            padding: 2rem; text-align: center; font-size: 0.85rem;
+        }
+        .footer a { color: var(--accent); text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            .hero h1 { font-size: 1.75rem; }
+            .arch-steps { flex-direction: column; }
+            .arch-arrow { transform: rotate(90deg); }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Hero -->
+<section class="hero">
+    <div class="hero-content">
+        <div class="version">CS366 — Serverless Architecture</div>
+        <h1>Report Ingestion &amp; Verification Service</h1>
+        <p class="subtitle">
+            ระบบรับแจ้งและตรวจสอบเหตุภัยพิบัติ ด้วย AI-Driven Trust Scoring บน AWS Serverless
+        </p>
+        <div class="hero-badges">
+            <span class="badge"><span class="dot"></span> AWS Lambda</span>
+            <span class="badge"><span class="dot"></span> DynamoDB</span>
+            <span class="badge"><span class="dot"></span> SQS</span>
+            <span class="badge"><span class="dot"></span> Gemini AI</span>
+            <span class="badge"><span class="dot"></span> EventBridge</span>
+        </div>
+        <div class="hero-actions">
+            <a href="/dashboard/" class="btn btn-primary">&#9881; Dashboard & API Tester</a>
+            <a href="https://github.com/Akawatmor/CS366-Serverless-ReportIngestion-VerificationService" target="_blank" class="btn btn-outline">&#128279; GitHub Repository</a>
+        </div>
+    </div>
+</section>
+
+<div class="container">
+
+    <!-- Health Status -->
+    <div class="status-banner">
+        <div class="status-left">
+            <div class="status-indicator" id="status-dot"></div>
+            <div>
+                <div class="status-text" id="status-text">Checking service status...</div>
+                <div class="status-sub" id="status-sub">Connecting to API</div>
+            </div>
+        </div>
+        <button id="check-health-btn" onclick="checkHealth()">&#x21bb; Check Status</button>
+    </div>
+
+    <!-- Features -->
+    <h2 class="section-title">&#128640; Features</h2>
+    <p class="section-desc">ความสามารถหลักของระบบ Report Ingestion &amp; Verification</p>
+    <div class="features">
+        <div class="feature-card">
+            <div class="feature-icon">&#128229;</div>
+            <h3>High-Throughput Ingestion</h3>
+            <p>รับข้อมูลรายงานจาก Social Media, Mobile Apps, IoT Sensors ผ่าน REST API พร้อมส่งเข้า SQS Queue ทันที (Fire-and-Forget)</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#129302;</div>
+            <h3>AI Trust Scoring</h3>
+            <p>ใช้ Google Gemini API วิเคราะห์ความน่าเชื่อถือ จำแนกประเภทเหตุการณ์ ตรวจจับ Spam อัตโนมัติ (&lt;30% = SPAM)</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#128200;</div>
+            <h3>Deduplication</h3>
+            <p>ลดความซ้ำซ้อนด้วย Haversine Formula (GPS ≤200m), Time Window (≤15min) และ External ID Check ผ่าน GSI</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#9989;</div>
+            <h3>Verification Workflow</h3>
+            <p>State Machine ครบวงจร: RECEIVED → PENDING_REVIEW → VERIFIED/SPAM/REJECTED/DUPLICATE พร้อม Optimistic Locking</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#128226;</div>
+            <h3>Event-Driven Architecture</h3>
+            <p>EventBridge Custom Bus สำหรับ broadcast เหตุการณ์ ReportVerifiedEvent, ReportStatusChangedEvent ไปยัง downstream services</p>
+        </div>
+        <div class="feature-card">
+            <div class="feature-icon">&#128202;</div>
+            <h3>Real-time Dashboard Stats</h3>
+            <p>สถิติแบบ Pre-aggregated ผ่าน Atomic Counter Table อ่านข้อมูลระดับ milliseconds ไม่ Scan ตารางหลัก</p>
+        </div>
+    </div>
+
+    <!-- API Endpoints -->
+    <section class="endpoints-section">
+        <h2 class="section-title">&#128421; API Endpoints</h2>
+        <p class="section-desc">Base URL: <code id="base-url-display" style="background:#e2e8f0;padding:0.2rem 0.5rem;border-radius:4px;font-size:0.85rem;">{API_GATEWAY_URL}/v1</code></p>
+        <table class="endpoint-table">
+            <thead>
+                <tr>
+                    <th>Method</th>
+                    <th>Path</th>
+                    <th>Description</th>
+                    <th>Auth</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="method-badge method-POST">POST</span></td>
+                    <td><code>/reports</code></td>
+                    <td>Submit raw disaster report (Fire-and-Forget via SQS)</td>
+                    <td>X-Api-Key</td>
+                </tr>
+                <tr>
+                    <td><span class="method-badge method-GET">GET</span></td>
+                    <td><code>/reports</code></td>
+                    <td>List pending reports (with pagination &amp; filters)</td>
+                    <td>X-Api-Key</td>
+                </tr>
+                <tr>
+                    <td><span class="method-badge method-GET">GET</span></td>
+                    <td><code>/reports/{id}</code></td>
+                    <td>Get report detail (AI analysis, metadata, verification)</td>
+                    <td>X-Api-Key</td>
+                </tr>
+                <tr>
+                    <td><span class="method-badge method-PATCH">PATCH</span></td>
+                    <td><code>/reports/{id}</code></td>
+                    <td>Verify/reject report (with state transition validation)</td>
+                    <td>X-Api-Key</td>
+                </tr>
+                <tr>
+                    <td><span class="method-badge method-DELETE">DELETE</span></td>
+                    <td><code>/reports/{id}</code></td>
+                    <td>Soft delete report (Audit logged)</td>
+                    <td>X-Api-Key</td>
+                </tr>
+                <tr>
+                    <td><span class="method-badge method-GET">GET</span></td>
+                    <td><code>/reports/stats</code></td>
+                    <td>Dashboard summary (Atomic Counter based)</td>
+                    <td>X-Api-Key</td>
+                </tr>
+                <tr>
+                    <td><span class="method-badge method-GET">GET</span></td>
+                    <td><code>/health</code></td>
+                    <td>Health check (DynamoDB, SQS, Gemini, EventBridge)</td>
+                    <td>Public</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Architecture Flow -->
+    <section class="arch-section">
+        <h2 class="section-title">&#127959; Architecture</h2>
+        <p class="section-desc">Serverless Event-Driven Architecture บน AWS</p>
+        <div class="arch-flow">
+            <div class="arch-steps">
+                <div class="arch-step">&#128241; Client</div>
+                <span class="arch-arrow">&#10132;</span>
+                <div class="arch-step aws">API Gateway</div>
+                <span class="arch-arrow">&#10132;</span>
+                <div class="arch-step aws">Lambda (Ingest)</div>
+                <span class="arch-arrow">&#10132;</span>
+                <div class="arch-step aws">SQS Queue</div>
+                <span class="arch-arrow">&#10132;</span>
+                <div class="arch-step aws">Lambda (Worker)</div>
+                <span class="arch-arrow">&#10132;</span>
+                <div class="arch-step aws">DynamoDB</div>
+            </div>
+            <div class="arch-steps" style="margin-top:1rem;">
+                <div class="arch-step aws">Lambda (Worker)</div>
+                <span class="arch-arrow">&#10132;</span>
+                <div class="arch-step external">Gemini AI</div>
+                <span class="arch-arrow">&nbsp;Trust Score&nbsp;</span>
+                <div class="arch-step aws">Lambda (API)</div>
+                <span class="arch-arrow">&#10132;</span>
+                <div class="arch-step aws">EventBridge</div>
+                <span class="arch-arrow">&#10132;</span>
+                <div class="arch-step">Downstream Services</div>
+            </div>
+            <p class="arch-note" style="margin-top:1rem;">
+                &#128274; API Key Authentication &bull;
+                &#128260; Async Processing via SQS &bull;
+                &#128163; DLQ for Failed Messages &bull;
+                &#9889; Partial Batch Failure Support
+            </p>
+        </div>
+    </section>
+
+    <!-- Tech Stack -->
+    <section class="tech-section">
+        <h2 class="section-title">&#128736; Tech Stack</h2>
+        <p class="section-desc">เทคโนโลยีที่ใช้ในระบบ</p>
+        <div class="tech-grid">
+            <div class="tech-card">
+                <div class="tech-logo">&#9889;</div>
+                <div>
+                    <div class="tech-name">AWS Lambda</div>
+                    <div class="tech-desc">Python 3.12 &bull; 4 Functions</div>
+                </div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-logo">&#128451;</div>
+                <div>
+                    <div class="tech-name">Amazon DynamoDB</div>
+                    <div class="tech-desc">3 Tables &bull; 2 GSIs</div>
+                </div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-logo">&#128233;</div>
+                <div>
+                    <div class="tech-name">Amazon SQS</div>
+                    <div class="tech-desc">Queue + DLQ &bull; Batch 10</div>
+                </div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-logo">&#129302;</div>
+                <div>
+                    <div class="tech-name">Google Gemini AI</div>
+                    <div class="tech-desc">gemini-2.0-flash &bull; Trust Scoring</div>
+                </div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-logo">&#128204;</div>
+                <div>
+                    <div class="tech-name">Amazon EventBridge</div>
+                    <div class="tech-desc">Custom Bus &bull; Event-Driven</div>
+                </div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-logo">&#127760;</div>
+                <div>
+                    <div class="tech-name">API Gateway</div>
+                    <div class="tech-desc">REST API &bull; Usage Plan</div>
+                </div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-logo">&#128230;</div>
+                <div>
+                    <div class="tech-name">Terraform</div>
+                    <div class="tech-desc">IaC &bull; ~> 5.0 &bull; Local State</div>
+                </div>
+            </div>
+            <div class="tech-card">
+                <div class="tech-logo">&#128220;</div>
+                <div>
+                    <div class="tech-name">Amazon S3</div>
+                    <div class="tech-desc">Static Website Hosting</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+</div>
+
+<!-- Footer -->
+<footer class="footer">
+    <p>
+        CS366 Serverless Architecture &bull;
+        Report Ingestion &amp; Verification Service &bull;
+        <a href="https://github.com/Akawatmor/CS366-Serverless-ReportIngestion-VerificationService" target="_blank">GitHub</a> &bull;
+        <a href="/dashboard/">Dashboard</a>
+    </p>
+    <p style="margin-top:0.5rem;font-size:0.8rem;">
+        Powered by AWS Lambda, DynamoDB, SQS, EventBridge, Google Gemini AI
+    </p>
+</footer>
+
+<script>
+    // =========================================
+    // Configuration — set API URL after deploy
+    // =========================================
+    const API_CONFIG = {
+        // Replace with actual API Gateway URL after terraform apply
+        // e.g. "https://abc123.execute-api.us-east-1.amazonaws.com/dev/v1"
+        baseUrl: localStorage.getItem('api_base_url') || '',
+        apiKey: localStorage.getItem('api_key') || ''
+    };
+
+    // Update base URL display
+    if (API_CONFIG.baseUrl) {
+        document.getElementById('base-url-display').textContent = API_CONFIG.baseUrl;
+    }
+
+    async function checkHealth() {
+        const dot = document.getElementById('status-dot');
+        const text = document.getElementById('status-text');
+        const sub = document.getElementById('status-sub');
+
+        if (!API_CONFIG.baseUrl) {
+            dot.className = 'status-indicator';
+            text.textContent = 'API URL not configured';
+            sub.textContent = 'Go to Dashboard to set API URL and API Key';
+            return;
+        }
+
+        text.textContent = 'Checking...';
+        sub.textContent = '';
+
+        try {
+            const resp = await fetch(`${API_CONFIG.baseUrl}/health`, {
+                method: 'GET',
+                headers: { 'Accept': 'application/json' }
+            });
+            const data = await resp.json();
+
+            if (data.status === 'healthy') {
+                dot.className = 'status-indicator online';
+                text.textContent = 'All Systems Operational';
+                sub.textContent = `Response time: ${data.duration_ms}ms · Version: ${data.version}`;
+            } else if (data.status === 'degraded') {
+                dot.className = 'status-indicator';
+                dot.style.background = '#f59e0b';
+                text.textContent = 'Degraded Performance';
+                const degraded = Object.entries(data.components || {})
+                    .filter(([, v]) => v.status !== 'healthy')
+                    .map(([k]) => k);
+                sub.textContent = `Issues: ${degraded.join(', ')}`;
+            } else {
+                dot.className = 'status-indicator';
+                dot.style.background = '#ef4444';
+                text.textContent = 'Service Unhealthy';
+                sub.textContent = 'Critical components are down';
+            }
+        } catch (err) {
+            dot.className = 'status-indicator';
+            dot.style.background = '#ef4444';
+            text.textContent = 'Cannot reach API';
+            sub.textContent = err.message;
+        }
+    }
+
+    // Auto-check on load
+    if (API_CONFIG.baseUrl) {
+        checkHealth();
+    } else {
+        document.getElementById('status-text').textContent = 'API URL not configured';
+        document.getElementById('status-sub').textContent = 'Go to Dashboard to set API URL and API Key';
+    }
+</script>
+
+</body>
+</html>
