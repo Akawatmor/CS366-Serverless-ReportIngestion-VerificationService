@@ -13,16 +13,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build"
 TF_DIR="$PROJECT_ROOT/terraform"
+LOGS_DIR="$PROJECT_ROOT/logs"
+DEPLOY_RESULT_FILE="$PROJECT_ROOT/.deploy-result"
 
 AUTO_APPROVE=""
 if [[ "${1:-}" == "--auto-approve" ]]; then
     AUTO_APPROVE="-auto-approve"
 fi
 
+# ----------------------------------------------------------
+# Setup logging — tee to both stdout and log file
+# ----------------------------------------------------------
+mkdir -p "$LOGS_DIR"
+LOG_FILE="$LOGS_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 echo "========================================"
 echo " Report Verify Service — Deploy"
 echo "========================================"
+echo "Timestamp:    $(date -Iseconds)"
 echo "Project root: $PROJECT_ROOT"
+echo "Log file:     $LOG_FILE"
 echo ""
 
 # ----------------------------------------------------------
@@ -147,9 +158,10 @@ echo ""
 echo "========================================"
 echo " Deployment Complete!"
 echo "========================================"
+echo " $(date -Iseconds)"
+echo ""
 
 # Display website URLs prominently
-echo ""
 WEBSITE_URL=$(terraform output -raw website_url 2>/dev/null || echo "")
 DASHBOARD_URL=$(terraform output -raw dashboard_url 2>/dev/null || echo "")
 API_URL=$(terraform output -raw api_url 2>/dev/null || echo "")
@@ -166,7 +178,19 @@ fi
 echo "  API Key:        (sensitive — run: terraform output -raw api_key)"
 echo ""
 
-# Full outputs
+# Save full outputs to .deploy-result for quick reference
+{
+    echo "# ================================================"
+    echo "# Deploy Result — $(date -Iseconds)"
+    echo "# Re-run: ./scripts/deploy.sh --auto-approve"
+    echo "# ================================================"
+    echo ""
+    terraform output 2>/dev/null
+} > "$DEPLOY_RESULT_FILE"
+echo "  Saved to:       $DEPLOY_RESULT_FILE"
+
+# Full outputs on screen
+echo ""
 terraform output -json | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
@@ -183,3 +207,6 @@ for key, val in data.items():
         print(f'{key}: {v}')
 print()
 " 2>/dev/null || terraform output
+
+echo ""
+echo "Log file: $LOG_FILE"
