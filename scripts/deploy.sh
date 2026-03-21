@@ -5,7 +5,7 @@
 # Usage:
 #   ./scripts/deploy.sh                    # deploy with defaults
 #   ./scripts/deploy.sh --auto-approve     # skip confirmation
-#   GEMINI_API_KEY=xxx ./scripts/deploy.sh # pass API key
+#   Reads .env file for GEMINI_API_KEY1, GEMINI_API_KEY2, etc.
 # ============================================================
 set -euo pipefail
 
@@ -13,17 +13,42 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build"
 TF_DIR="$PROJECT_ROOT/terraform"
+LOGS_DIR="$PROJECT_ROOT/logs"
+DEPLOY_RESULT_FILE="$PROJECT_ROOT/.deploy-result"
 
 AUTO_APPROVE=""
 if [[ "${1:-}" == "--auto-approve" ]]; then
     AUTO_APPROVE="-auto-approve"
 fi
 
+# ----------------------------------------------------------
+# Setup logging — tee to both stdout and log file
+# ----------------------------------------------------------
+mkdir -p "$LOGS_DIR"
+LOG_FILE="$LOGS_DIR/deploy-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 echo "========================================"
 echo " Report Verify Service — Deploy"
 echo "========================================"
+echo "Timestamp:    $(date -Iseconds)"
 echo "Project root: $PROJECT_ROOT"
+echo "Log file:     $LOG_FILE"
 echo ""
+
+# ----------------------------------------------------------
+# Load .env file
+# ----------------------------------------------------------
+ENV_FILE="$PROJECT_ROOT/.env"
+if [[ -f "$ENV_FILE" ]]; then
+    echo "[*] Loading .env file..."
+    set -a
+    source "$ENV_FILE"
+    set +a
+    echo "  -> Loaded: $ENV_FILE"
+else
+    echo "[!] No .env file found at $ENV_FILE — using environment variables"
+fi
 
 # ----------------------------------------------------------
 # Step 1: Clean build directory
@@ -33,14 +58,15 @@ rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
 # ----------------------------------------------------------
-# Step 2: Build Lambda Layer (dependencies)
+# Step 2: Build Lambda package (source + dependencies)
 # ----------------------------------------------------------
-echo "[2/5] Building Lambda Layer..."
-LAYER_DIR="$BUILD_DIR/lambda_layer_content/python"
-mkdir -p "$LAYER_DIR"
+echo "[2/5] Building Lambda package..."
+SRC_STAGING="$BUILD_DIR/lambda_src_staging"
+mkdir -p "$SRC_STAGING"
 
+# Install dependencies directly into staging dir
 pip install \
-    --target "$LAYER_DIR" \
+    --target "$SRC_STAGING" \
     --platform manylinux2014_x86_64 \
     --implementation cp \
     --python-version 3.12 \
@@ -49,18 +75,39 @@ pip install \
     -r "$PROJECT_ROOT/requirements.txt" \
     2>&1 | tail -5
 
-# Create layer zip
+# Fix google namespace packages (no __init__.py by default)
+for dir in $(find "$SRC_STAGING" -type d -name "google"); do
+    if [[ ! -f "$dir/__init__.py" ]]; then
+        echo "# namespace package" > "$dir/__init__.py"
+    fi
+    for subdir in "$dir"/*/; do
+        if [[ -d "$subdir" && ! -f "$subdir/__init__.py" ]]; then
+            echo "# namespace package" > "$subdir/__init__.py"
+        fi
+    done
+done
+
+# Copy source code into staging
+cp -r "$PROJECT_ROOT/src" "$SRC_STAGING/src"
+
+# Create the source zip (includes everything Lambda needs)
+cd "$SRC_STAGING"
+zip -r9 "$BUILD_DIR/lambda_src.zip" . -x "*.pyc" "__pycache__/*" "*.egg-info/*" "*.dist-info/*" > /dev/null
+echo "  -> Lambda package: $(du -sh "$BUILD_DIR/lambda_src.zip" | cut -f1)"
+echo "  -> Uncompressed:   $(du -sh "$SRC_STAGING" | cut -f1)"
+
+# Also create a minimal layer zip (empty placeholder for Terraform)
+mkdir -p "$BUILD_DIR/lambda_layer_content/python"
+echo "# placeholder" > "$BUILD_DIR/lambda_layer_content/python/__init__.py"
 cd "$BUILD_DIR/lambda_layer_content"
-zip -r9 "$BUILD_DIR/lambda_layer.zip" python/ -x "*.pyc" "__pycache__/*" > /dev/null
-echo "  -> Lambda layer: $(du -sh "$BUILD_DIR/lambda_layer.zip" | cut -f1)"
+zip -r9 "$BUILD_DIR/lambda_layer.zip" python/ > /dev/null
 
 # ----------------------------------------------------------
-# Step 3: Package Lambda source code
+# Step 3: Verify package
 # ----------------------------------------------------------
-echo "[3/5] Packaging Lambda source..."
-cd "$PROJECT_ROOT/src"
-zip -r9 "$BUILD_DIR/lambda_src.zip" . -x "*.pyc" "__pycache__/*" "*.egg-info/*" > /dev/null
-echo "  -> Lambda source: $(du -sh "$BUILD_DIR/lambda_src.zip" | cut -f1)"
+echo "[3/5] Verifying Lambda package..."
+echo "  -> google module: $(unzip -l "$BUILD_DIR/lambda_src.zip" | grep -c "google/")"
+echo "  -> src module:    $(unzip -l "$BUILD_DIR/lambda_src.zip" | grep -c "src/")"
 
 # ----------------------------------------------------------
 # Step 4: Terraform init
@@ -74,10 +121,28 @@ terraform init -input=false
 # ----------------------------------------------------------
 echo "[5/5] Applying Terraform..."
 
-# Pass Gemini API key if set in environment
+# Collect ALL GEMINI_API_KEY{N} from environment (N = 1..9999)
+# Joins them into a comma-separated string for Terraform
+GEMINI_KEYS_CSV=""
+KEY_COUNT=0
+for var_name in $(printenv | grep -oP '^GEMINI_API_KEY\d+' | sort -V); do
+    val="${!var_name}"
+    if [[ -n "$val" ]]; then
+        ((KEY_COUNT++))
+        GEMINI_KEYS_CSV="${GEMINI_KEYS_CSV:+${GEMINI_KEYS_CSV},}${val}"
+        echo "  -> Found $var_name"
+    fi
+done
+echo "  -> Total Gemini API keys: $KEY_COUNT"
+
 TF_VARS=""
-if [[ -n "${GEMINI_API_KEY:-}" ]]; then
-    TF_VARS="-var=gemini_api_key=$GEMINI_API_KEY"
+if [[ -n "$GEMINI_KEYS_CSV" ]]; then
+    TF_VARS="$TF_VARS -var=gemini_api_keys=${GEMINI_KEYS_CSV}"
+fi
+
+# Gemini model fallbacks
+if [[ -n "${GEMINI_MODEL_FALLBACKS:-}" ]]; then
+    TF_VARS="$TF_VARS -var=gemini_model_fallbacks=${GEMINI_MODEL_FALLBACKS}"
 fi
 
 if [[ -n "$AUTO_APPROVE" ]]; then
@@ -101,10 +166,43 @@ echo ""
 echo "========================================"
 echo " Deployment Complete!"
 echo "========================================"
+echo " $(date -Iseconds)"
+echo ""
+
+# Display website URLs prominently
+WEBSITE_URL=$(terraform output -raw website_url 2>/dev/null || echo "")
+DASHBOARD_URL=$(terraform output -raw dashboard_url 2>/dev/null || echo "")
+API_URL=$(terraform output -raw api_url 2>/dev/null || echo "")
+
+if [[ -n "$WEBSITE_URL" ]]; then
+    echo "  Landing Page:   $WEBSITE_URL"
+fi
+if [[ -n "$DASHBOARD_URL" ]]; then
+    echo "  Dashboard:      $DASHBOARD_URL"
+fi
+if [[ -n "$API_URL" ]]; then
+    echo "  API Base URL:   $API_URL"
+fi
+echo "  API Key:        (sensitive — run: terraform output -raw api_key)"
+echo ""
+
+# Save full outputs to .deploy-result for quick reference
+{
+    echo "# ================================================"
+    echo "# Deploy Result — $(date -Iseconds)"
+    echo "# Re-run: ./scripts/deploy.sh --auto-approve"
+    echo "# ================================================"
+    echo ""
+    terraform output 2>/dev/null
+} > "$DEPLOY_RESULT_FILE"
+echo "  Saved to:       $DEPLOY_RESULT_FILE"
+
+# Full outputs on screen
+echo ""
 terraform output -json | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
-print()
+print('--- All Outputs ---')
 for key, val in data.items():
     v = val.get('value', '')
     if isinstance(v, dict):
@@ -117,3 +215,6 @@ for key, val in data.items():
         print(f'{key}: {v}')
 print()
 " 2>/dev/null || terraform output
+
+echo ""
+echo "Log file: $LOG_FILE"

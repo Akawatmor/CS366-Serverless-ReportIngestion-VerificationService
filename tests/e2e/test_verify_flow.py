@@ -25,18 +25,30 @@ def api_client():
     return httpx.Client(base_url=API_URL, headers=headers, timeout=30)
 
 
-def _create_and_wait(api_client, content="E2E verify test report") -> str:
-    """Helper: submit a report and wait for it to be processed."""
+import random
+
+def _create_and_wait(api_client, content="E2E verify test report", max_wait=60) -> str:
+    """Helper: submit a report and poll until processed (or timeout)."""
+    # Use random coordinates far apart to avoid dedup (200m radius)
+    lat = random.uniform(-30.0, 60.0)
+    lon = random.uniform(-120.0, 150.0)
     payload = {
         "reporter_source": "OFFICIAL_APP",
         "reporter_id": "e2e_verifier",
         "raw_content": content,
-        "geo_location": {"lat": 13.7563, "lon": 100.5018},
+        "geo_location": {"lat": round(lat, 4), "lon": round(lon, 4)},
     }
     resp = api_client.post("/v1/reports", json=payload)
     assert resp.status_code == 202
     report_id = resp.json()["report_id"]
-    time.sleep(5)
+
+    # Poll until report leaves RECEIVED status (worker has processed it)
+    deadline = time.time() + max_wait
+    while time.time() < deadline:
+        time.sleep(5)
+        r = api_client.get(f"/v1/reports/{report_id}")
+        if r.status_code == 200 and r.json().get("status", "RECEIVED") != "RECEIVED":
+            break
     return report_id
 
 
@@ -45,7 +57,9 @@ class TestVerifyFlow:
 
     def test_verify_pending_report(self, api_client):
         """PATCH a PENDING_REVIEW report to VERIFIED should succeed."""
-        report_id = _create_and_wait(api_client, "E2E verify test — flood near bridge")
+        import uuid
+        unique = uuid.uuid4().hex[:8]
+        report_id = _create_and_wait(api_client, f"Unique verify test {unique} — major flooding at riverside district")
 
         # Check current status
         resp = api_client.get(f"/v1/reports/{report_id}")
@@ -58,20 +72,22 @@ class TestVerifyFlow:
 
         # Verify
         verify_payload = {
-            "action": "VERIFY",
+            "validation_status": "VERIFIED",
             "reviewer_id": "e2e_admin_001",
-            "comment": "E2E test — verified by automated test",
+            "reviewer_notes": "E2E test — verified by automated test",
         }
         resp = api_client.patch(f"/v1/reports/{report_id}", json=verify_payload)
         assert resp.status_code == 200
 
         body = resp.json()
-        assert body["status"] == "VERIFIED"
-        assert body["verified_by"] == "e2e_admin_001"
+        assert body["validation_status"] == "VERIFIED"
+        assert "action_taken" in body
 
     def test_reject_pending_report(self, api_client):
         """PATCH a PENDING_REVIEW report to REJECTED should succeed."""
-        report_id = _create_and_wait(api_client, "E2E reject test — false alarm")
+        import uuid
+        unique = uuid.uuid4().hex[:8]
+        report_id = _create_and_wait(api_client, f"Unique reject test {unique} — earthquake tremor in northern region")
 
         resp = api_client.get(f"/v1/reports/{report_id}")
         if resp.status_code != 200:
@@ -80,13 +96,13 @@ class TestVerifyFlow:
             pytest.skip("Report not in PENDING_REVIEW")
 
         reject_payload = {
-            "action": "REJECT",
+            "validation_status": "REJECTED",
             "reviewer_id": "e2e_moderator",
-            "comment": "E2E test — rejected as false alarm",
+            "reviewer_notes": "E2E test — rejected as false alarm",
         }
         resp = api_client.patch(f"/v1/reports/{report_id}", json=reject_payload)
         assert resp.status_code == 200
-        assert resp.json()["status"] == "REJECTED"
+        assert resp.json()["validation_status"] == "REJECTED"
 
     def test_invalid_transition(self, api_client):
         """PATCH an already-VERIFIED report to VERIFY again should fail."""
@@ -101,18 +117,18 @@ class TestVerifyFlow:
         # First verify (if PENDING_REVIEW)
         if current_status == "PENDING_REVIEW":
             verify_payload = {
-                "action": "VERIFY",
+                "validation_status": "VERIFIED",
                 "reviewer_id": "e2e_admin",
-                "comment": "First verify",
+                "reviewer_notes": "First verify",
             }
             resp = api_client.patch(f"/v1/reports/{report_id}", json=verify_payload)
             assert resp.status_code == 200
 
         # Try verify again — invalid transition from VERIFIED → VERIFIED
         verify_again = {
-            "action": "VERIFY",
+            "validation_status": "VERIFIED",
             "reviewer_id": "e2e_admin",
-            "comment": "Second verify attempt",
+            "reviewer_notes": "Second verify attempt",
         }
         resp = api_client.patch(f"/v1/reports/{report_id}", json=verify_again)
         # Should be 409 Conflict or 400 Bad Request

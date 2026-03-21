@@ -28,6 +28,7 @@ override.tf.json
 lambda_packages/
 *.zip
 lambda_layer/
+package/
 
 # IDE
 .idea/
@@ -54,3 +55,7 @@ htmlcov/
 
 # Logs
 *.log
+logs/
+
+# Deploy result
+.deploy-result

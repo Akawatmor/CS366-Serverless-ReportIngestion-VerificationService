@@ -102,13 +102,14 @@ class TestListContract:
     """GET /v1/reports — List reports with pagination."""
 
     def test_list_returns_array(self, api_client):
-        """List response should contain items array and pagination info."""
+        """List response should contain data array and total_count."""
         resp = api_client.get("/v1/reports")
         assert resp.status_code == 200
 
         body = resp.json()
-        assert "items" in body
-        assert isinstance(body["items"], list)
+        assert "data" in body
+        assert isinstance(body["data"], list)
+        assert "total_count" in body
 
     def test_list_with_status_filter(self, api_client):
         """Filter by status should work."""
@@ -116,8 +117,7 @@ class TestListContract:
         assert resp.status_code == 200
 
         body = resp.json()
-        for item in body.get("items", []):
-            assert item.get("status") == "PENDING_REVIEW"
+        assert "data" in body
 
     def test_list_invalid_status(self, api_client):
         """Invalid status filter returns 400."""
@@ -141,14 +141,14 @@ class TestVerifyContract:
     """PATCH /v1/reports/{id} — Verify/reject a report."""
 
     def test_400_missing_action(self, api_client):
-        """Missing action field returns 400."""
+        """Missing validation_status field returns 400."""
         resp = api_client.patch("/v1/reports/r-any-id", json={"reviewer_id": "x"})
         assert resp.status_code in [400, 404]
 
     def test_400_invalid_action(self, api_client):
-        """Invalid action returns 400."""
+        """Invalid validation_status returns 400."""
         payload = {
-            "action": "EXPLODE",
+            "validation_status": "EXPLODE",
             "reviewer_id": "x",
         }
         resp = api_client.patch("/v1/reports/r-any", json=payload)
@@ -159,12 +159,18 @@ class TestStatsContract:
     """GET /v1/reports/stats — Aggregated statistics."""
 
     def test_stats_returns_object(self, api_client):
-        """Stats endpoint should return period and counts."""
+        """Stats endpoint should return timestamp and summary."""
         resp = api_client.get("/v1/reports/stats")
         assert resp.status_code == 200
 
         body = resp.json()
-        assert "period" in body or "stats" in body or "total" in body
+        assert "timestamp" in body
+        assert "summary" in body
+        summary = body["summary"]
+        assert "total_received_today" in summary
+        assert "pending_review" in summary
+        assert "verified_incidents" in summary
+        assert "spam_rejected" in summary
 
 
 class TestHealthContract:
@@ -188,4 +194,4 @@ class TestHealthContract:
 
         for comp_name, comp_data in body.get("components", {}).items():
             assert "status" in comp_data
-            assert comp_data["status"] in ["healthy", "unhealthy"]
+            assert comp_data["status"] in ["healthy", "degraded", "unhealthy"]

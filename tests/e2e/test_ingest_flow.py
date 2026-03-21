@@ -75,8 +75,13 @@ class TestIngestFlow:
         assert resp.status_code == 202
         report_id = resp.json()["report_id"]
 
-        # Wait for SQS → Worker processing
-        time.sleep(5)
+        # Wait for SQS → Worker processing (poll up to 60s)
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            time.sleep(5)
+            resp = api_client.get(f"/v1/reports/{report_id}")
+            if resp.status_code == 200 and resp.json().get("status", "RECEIVED") != "RECEIVED":
+                break
 
         # Fetch detail
         resp = api_client.get(f"/v1/reports/{report_id}")

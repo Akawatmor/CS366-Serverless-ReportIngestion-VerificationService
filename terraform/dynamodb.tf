@@ -30,6 +30,11 @@ resource "aws_dynamodb_table" "reports" {
     type = "S"
   }
 
+  attribute {
+    name = "reporter_id"
+    type = "S"
+  }
+
   # GSI 1: Query by status + time (for GET /reports?status=PENDING_REVIEW)
   global_secondary_index {
     name            = "gsi_status_ingested"
@@ -43,6 +48,15 @@ resource "aws_dynamodb_table" "reports" {
     name            = "gsi_source_external_id"
     hash_key        = "source_external_id"
     projection_type = "KEYS_ONLY"
+  }
+
+  # GSI 3: Reporter history lookup (for SPAM detection)
+  global_secondary_index {
+    name            = "gsi_reporter"
+    hash_key        = "reporter_id"
+    range_key       = "ingested_at"
+    projection_type = "INCLUDE"
+    non_key_attributes = ["validation_status", "trust_score"]
   }
 
   point_in_time_recovery {

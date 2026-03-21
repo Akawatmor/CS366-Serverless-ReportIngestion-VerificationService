@@ -43,6 +43,26 @@ output "event_bus_name" {
   value       = aws_cloudwatch_event_bus.disaster_bus.name
 }
 
+output "website_url" {
+  description = "S3 Static Website URL (Landing Page)"
+  value       = "http://${aws_s3_bucket_website_configuration.website.website_endpoint}"
+}
+
+output "dashboard_url" {
+  description = "S3 Static Website Dashboard URL"
+  value       = "http://${aws_s3_bucket_website_configuration.website.website_endpoint}/dashboard/"
+}
+
+output "website_bucket" {
+  description = "S3 Website bucket name"
+  value       = aws_s3_bucket.website.id
+}
+
+output "media_bucket" {
+  description = "S3 Media storage bucket name"
+  value       = aws_s3_bucket.media.id
+}
+
 output "endpoints" {
   description = "All available API endpoints"
   value = {
@@ -53,5 +73,10 @@ output "endpoints" {
     verify      = "PATCH  ${aws_api_gateway_stage.dev.invoke_url}/v1/reports/{report_id}"
     delete      = "DELETE ${aws_api_gateway_stage.dev.invoke_url}/v1/reports/{report_id}"
     stats       = "GET    ${aws_api_gateway_stage.dev.invoke_url}/v1/reports/stats"
+    audit       = "GET    ${aws_api_gateway_stage.dev.invoke_url}/v1/reports/audit"
+    events      = "GET    ${aws_api_gateway_stage.dev.invoke_url}/v1/reports/events"
+    upload_url  = "POST   ${aws_api_gateway_stage.dev.invoke_url}/v1/reports/upload-url"
+    website     = "http://${aws_s3_bucket_website_configuration.website.website_endpoint}"
+    dashboard   = "http://${aws_s3_bucket_website_configuration.website.website_endpoint}/dashboard/"
   }
 }

@@ -24,10 +24,55 @@ class Config:
     EVENT_BUS_NAME: str = os.environ.get("EVENT_BUS_NAME", "disaster-event-bus")
     EVENT_SOURCE: str = "service.report-verify"
 
-    # Gemini AI
-    GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-    GEMINI_TIMEOUT: int = int(os.environ.get("GEMINI_TIMEOUT", "10"))
+    # S3 Media
+    MEDIA_BUCKET: str = os.environ.get("MEDIA_BUCKET", "")
+
+    # Gemini AI — multi-key rotation + model fallback
+    GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")  # legacy single key
+    GEMINI_API_KEYS: list = []  # populated in __init_keys()
+    GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+    GEMINI_MODEL_FALLBACKS: list = []  # populated in __init_models()
+    GEMINI_TIMEOUT: int = int(os.environ.get("GEMINI_TIMEOUT", "15"))
+
+    @staticmethod
+    def __init_keys() -> list:
+        """Load Gemini API keys from environment.
+
+        Supports (in priority order):
+          1. GEMINI_API_KEYS — comma-separated string (used by Lambda env)
+          2. GEMINI_API_KEY1..GEMINI_API_KEY9999 — individual vars (used by local .env)
+          3. GEMINI_API_KEY — single key fallback (legacy)
+        """
+        import re
+
+        # Method 1: Comma-separated (from Terraform → Lambda env)
+        csv_keys = os.environ.get("GEMINI_API_KEYS", "")
+        if csv_keys:
+            return [k.strip() for k in csv_keys.split(",") if k.strip()]
+
+        # Method 2: Individual numbered keys (GEMINI_API_KEY1..GEMINI_API_KEY9999)
+        key_vars = sorted(
+            [(name, val) for name, val in os.environ.items()
+             if re.match(r'^GEMINI_API_KEY\d+$', name) and val],
+            key=lambda x: int(re.search(r'\d+', x[0]).group()),
+        )
+        keys = [val for _, val in key_vars]
+
+        # Method 3: Single key fallback
+        if not keys:
+            single = os.environ.get("GEMINI_API_KEY", "")
+            if single:
+                keys.append(single)
+        return keys
+
+    @staticmethod
+    def __init_models() -> list:
+        """Load model fallback chain from env or use defaults."""
+        chain_env = os.environ.get("GEMINI_MODEL_FALLBACKS", "")
+        if chain_env:
+            return [m.strip() for m in chain_env.split(",") if m.strip()]
+        # Default chain: flash-lite → flash → 3.1-flash-lite
+        return ["gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-3.1-flash-lite"]
 
     # Trust Score Thresholds
     TRUST_AUTO_REJECT: int = int(os.environ.get("TRUST_AUTO_REJECT", "30"))
@@ -41,6 +86,13 @@ class Config:
     DEFAULT_PAGE_LIMIT: int = 5
     MAX_PAGE_LIMIT: int = 100
     MAX_PAYLOAD_BYTES: int = 256 * 1024  # 256 KB
+
+    def __init__(self):
+        self.GEMINI_API_KEYS = self.__init_keys()
+        self.GEMINI_MODEL_FALLBACKS = self.__init_models()
+        # Set primary key for backward compat
+        if self.GEMINI_API_KEYS and not self.GEMINI_API_KEY:
+            self.GEMINI_API_KEY = self.GEMINI_API_KEYS[0]
 
 
 config = Config()

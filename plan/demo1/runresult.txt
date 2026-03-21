@@ -1,0 +1,249 @@
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== 1. Health Check ===" && curl -s -X GET "$API_URL/health" -H "X-Api-Key: $API_KEY" | python3 -m json.tool
+=== 1. Health Check ===
+{
+    "status": "healthy",
+    "timestamp": "2026-03-07T16:46:06.064828+00:00",
+    "duration_ms": 15912,
+    "components": {
+        "dynamodb": {
+            "status": "healthy",
+            "table": "report-verify-dev-reports",
+            "table_status": "ACTIVE"
+        },
+        "sqs": {
+            "status": "healthy",
+            "queue_url": "https://sqs.us-east-1.amazonaws.com/035136704221/report-verify-dev-ingestion-queue",
+            "approximate_messages": 0
+        },
+        "gemini": {
+            "status": "healthy",
+            "model": "gemini-2.5-flash-lite",
+            "available_keys": 2,
+            "model_chain": [
+                "gemini-2.5-flash-lite",
+                "gemini-2.0-flash",
+                "gemini-3.1-flash-lite"
+            ]
+        },
+        "eventbridge": {
+            "status": "healthy",
+            "bus": "report-verify-dev-disaster-event-bus"
+        }
+    },
+    "version": "1.0.0"
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== 2. Submit Disaster Report (Async via SQS) ===" && curl -s -X POST "$API_URL/reports" \
+>   -H "X-Api-Key: $API_KEY" \
+>   -H "Content-Type: application/json" \
+>   -d '{
+>     "title": "น้ำท่วมหนัก อ.เมือง จ.เชียงใหม่",
+>     "description": "น้ำจากแม่น้ำปิงเอ่อล้นตลิ่ง ท่วมชุมชนริมน้ำ 3 หมู่บ้าน บ้านเรือนได้รับความเสียหายกว่า 200 หลัง ชาวบ้านติดอยู่บนหลังคา ต้องการเรือช่วยเหลือจำนวนมาก น้ำสูงประมาณ 1.5 เมตร",
+>     "reporter_name": "สมชาย ใจดี",
+>     "location": "อ.เมือง จ.เชียงใหม่",
+>     "disaster_type": "FLOOD",
+>     "urgency": "CRITICAL",
+>     "contact_info": "081-234-5678"
+>   }' | python3 -m json.tool
+=== 2. Submit Disaster Report (Async via SQS) ===
+{
+    "error": true,
+    "message": "Validation failed.",
+    "detail": "reporter_source is required.; reporter_id is required.; At least one of raw_content or media_urls is required."
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== 2. Submit Real Disaster Report ===" && curl -s -X POST "$API_URL/reports" \
+>   -H "X-Api-Key: $API_KEY" \
+>   -H "Content-Type: application/json" \
+>   -d '{
+>     "reporter_source": "OFFICIAL_APP",
+>     "reporter_id": "demo_officer_01",
+>     "raw_content": "น้ำท่วมหนักบริเวณถนนพหลโยธิน ซอย 15 น้ำสูงประมาณ 50 เซนติเมตร รถยนต์ไม่สามารถสัญจรได้ มีประชาชนติดอยู่ในบ้านหลายหลัง ขอความช่วยเหลือด่วน",
+>     "location": "กรุงเทพ พหลโยธิน ซอย 15",
+>     "disaster_type": "FLOOD",
+>     "urgency": "CRITICAL",
+>     "contact_info": "081-234-5678"
+>   }' | python3 -m json.tool
+=== 2. Submit Real Disaster Report ===
+{
+    "status": "QUEUED",
+    "report_id": "r-7689d779f294",
+    "message": "Report accepted and queued for processing.",
+    "estimated_wait_time": "2s"
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== 3. Submit Spam Report ===" && curl -s -X POST "$API_URL/reports" \
+>   -H "X-Api-Key: $API_KEY" \
+>   -H "Content-Type: application/json" \
+>   -d '{
+>     "reporter_source": "TWITTER",
+>     "reporter_id": "@random_user_999",
+>     "raw_content": "lol check out my new mixtape fire fire fire click here www.spam-link.com free iphone giveaway",
+>     "location": "somewhere",
+>     "disaster_type": "OTHER"
+>   }' | python3 -m json.tool
+=== 3. Submit Spam Report ===
+{
+    "status": "QUEUED",
+    "report_id": "r-0fe730fec9d4",
+    "message": "Report accepted and queued for processing.",
+    "estimated_wait_time": "2s"
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  echo "Waiting 15s for SQS worker + Gemini AI processing..." && sleep 15 && API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== 4. List All Reports ===" && curl -s -X GET "$API_URL/reports" -H "X-Api-Key: $API_KEY" | python3 -m json.tool
+Waiting 15s for SQS worker + Gemini AI processing...
+=== 4. List All Reports ===
+{
+    "data": [],
+    "total_count": 0
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  echo "Waiting 20 more seconds..." && sleep 20 && API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== List all reports (no filter) ===" && curl -s -X GET "$API_URL/reports?limit=10" -H "X-Api-Key: $API_KEY" | python3 -m json.tool
+Waiting 20 more seconds...
+=== List all reports (no filter) ===
+{
+    "data": [
+        {
+            "report_id": "r-7689d779f294",
+            "content": "\u0e19\u0e49\u0e33\u0e17\u0e48\u0e27\u0e21\u0e2b\u0e19\u0e31\u0e01\u0e1a\u0e23\u0e34\u0e40\u0e27\u0e13\u0e16\u0e19\u0e19\u0e1e\u0e2b\u0e25\u0e42\u0e22\u0e18\u0e34\u0e19 \u0e0b\u0e2d\u0e22 15 \u0e19\u0e49\u0e33\u0e2a\u0e39\u0e07\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 50 \u0e40\u0e0b\u0e19\u0e15\u0e34\u0e40\u0e21\u0e15\u0e23 \u0e23\u0e16\u0e22\u0e19\u0e15\u0e4c\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e2a\u0e31\u0e0d...",
+            "trust_score": 85,
+            "suggested_category": "FLOOD",
+            "time_ago": "1 mins"
+        }
+    ],
+    "total_count": 1
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== 5. Get Detail: Real Report ===" && curl -s -X GET "$API_URL/reports/r-7689d779f294" -H "X-Api-Key: $API_KEY" | python3 -m json.tool && echo "" && echo "=== 5b. Get Detail: Spam Report ===" && curl -s -X GET "$API_URL/reports/r-0fe730fec9d4" -H "X-Api-Key: $API_KEY" | python3 -m json.tool
+=== 5. Get Detail: Real Report ===
+{
+    "report_id": "r-7689d779f294",
+    "reporter_info": {
+        "source": "OFFICIAL_APP",
+        "reporter_id": "demo_officer_01",
+        "source_external_id": null
+    },
+    "content": {
+        "text": "\u0e19\u0e49\u0e33\u0e17\u0e48\u0e27\u0e21\u0e2b\u0e19\u0e31\u0e01\u0e1a\u0e23\u0e34\u0e40\u0e27\u0e13\u0e16\u0e19\u0e19\u0e1e\u0e2b\u0e25\u0e42\u0e22\u0e18\u0e34\u0e19 \u0e0b\u0e2d\u0e22 15 \u0e19\u0e49\u0e33\u0e2a\u0e39\u0e07\u0e1b\u0e23\u0e30\u0e21\u0e32\u0e13 50 \u0e40\u0e0b\u0e19\u0e15\u0e34\u0e40\u0e21\u0e15\u0e23 \u0e23\u0e16\u0e22\u0e19\u0e15\u0e4c\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e2a\u0e31\u0e0d\u0e08\u0e23\u0e44\u0e14\u0e49 \u0e21\u0e35\u0e1b\u0e23\u0e30\u0e0a\u0e32\u0e0a\u0e19\u0e15\u0e34\u0e14\u0e2d\u0e22\u0e39\u0e48\u0e43\u0e19\u0e1a\u0e49\u0e32\u0e19\u0e2b\u0e25\u0e32\u0e22\u0e2b\u0e25\u0e31\u0e07 \u0e02\u0e2d\u0e04\u0e27\u0e32\u0e21\u0e0a\u0e48\u0e27\u0e22\u0e40\u0e2b\u0e25\u0e37\u0e2d\u0e14\u0e48\u0e27\u0e19",
+        "images": [],
+        "video": null
+    },
+    "analysis": {
+        "trust_score": 85,
+        "ai_reasoning": "The report is from an official app and provides specific details about the flood's severity (water level, impassable roads, trapped residents) and a clear call for help. The lack of precise coordinates slightly reduces the score.",
+        "suggested_category": "FLOOD",
+        "ai_analysis_tags": [
+            "\u0e19\u0e49\u0e33\u0e17\u0e48\u0e27\u0e21",
+            "\u0e16\u0e19\u0e19\u0e1e\u0e2b\u0e25\u0e42\u0e22\u0e18\u0e34\u0e19",
+            "\u0e23\u0e16\u0e22\u0e19\u0e15\u0e4c\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e2a\u0e31\u0e0d\u0e08\u0e23\u0e44\u0e14\u0e49",
+            "\u0e1b\u0e23\u0e30\u0e0a\u0e32\u0e0a\u0e19\u0e15\u0e34\u0e14\u0e43\u0e19\u0e1a\u0e49\u0e32\u0e19",
+            "\u0e02\u0e2d\u0e04\u0e27\u0e32\u0e21\u0e0a\u0e48\u0e27\u0e22\u0e40\u0e2b\u0e25\u0e37\u0e2d\u0e14\u0e48\u0e27\u0e19"
+        ],
+        "ai_analysis_failed": false,
+        "potential_duplicates": []
+    },
+    "geo_location": null,
+    "status": "PENDING_REVIEW",
+    "verified_by": null,
+    "verification_notes": null,
+    "linked_incident_id": null,
+    "created_at": "2026-03-07T16:46:47.983160+00:00",
+    "event_timestamp": "2026-03-07T16:46:47.983153+00:00"
+}
+
+=== 5b. Get Detail: Spam Report ===
+{
+    "report_id": "r-0fe730fec9d4",
+    "reporter_info": {
+        "source": "TWITTER",
+        "reporter_id": "@random_user_999",
+        "source_external_id": null
+    },
+    "content": {
+        "text": "lol check out my new mixtape fire fire fire click here www.spam-link.com free iphone giveaway",
+        "images": [],
+        "video": null
+    },
+    "analysis": {
+        "trust_score": 5,
+        "ai_reasoning": "The report contains irrelevant content like 'mixtape' and 'free iphone giveaway', along with a suspicious link. The word 'fire' is used metaphorically and not in a disaster context. The location is also marked as N/A.",
+        "suggested_category": "OTHER",
+        "ai_analysis_tags": [
+            "mixtape",
+            "fire",
+            "free iphone giveaway"
+        ],
+        "ai_analysis_failed": false,
+        "potential_duplicates": []
+    },
+    "geo_location": null,
+    "status": "SPAM",
+    "verified_by": null,
+    "verification_notes": null,
+    "linked_incident_id": null,
+    "created_at": "2026-03-07T16:46:59.265722+00:00",
+    "event_timestamp": "2026-03-07T16:46:59.265714+00:00"
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== 6. Verify (Approve) the Flood Report ===" && curl -s -X PATCH "$API_URL/reports/r-7689d779f294" \
+>   -H "X-Api-Key: $API_KEY" \
+>   -H "Content-Type: application/json" \
+>   -d '{
+>     "status": "VERIFIED",
+>     "reviewer_id": "admin_somchai",
+>     "reviewer_notes": "ยืนยันแล้ว ส่งหน่วยกู้ภัยออกไป",
+>     "link_to_incident_id": "INC-2026-0042"
+>   }' | python3 -m json.tool
+=== 6. Verify (Approve) the Flood Report ===
+{
+    "error": true,
+    "message": "Validation failed.",
+    "detail": "validation_status is required."
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== 6. Verify (Approve) the Flood Report ===" && curl -s -X PATCH "$API_URL/reports/r-7689d779f294" \
+>   -H "X-Api-Key: $API_KEY" \
+>   -H "Content-Type: application/json" \
+>   -d '{
+>     "validation_status": "VERIFIED",
+>     "reviewer_id": "admin_somchai",
+>     "reviewer_notes": "ยืนยันแล้ว ส่งหน่วยกู้ภัยออกไป",
+>     "link_to_incident_id": "INC-2026-0042"
+>   }' | python3 -m json.tool
+=== 6. Verify (Approve) the Flood Report ===
+{
+    "report_id": "r-7689d779f294",
+    "validation_status": "VERIFIED",
+    "action_taken": "MERGED_EXISTING_INCIDENT",
+    "updated_at": "2026-03-07T16:48:40.617452+00:00"
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  API_URL="https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1" && API_KEY="bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ" && echo "=== 7. Get Stats ===" && curl -s -X GET "$API_URL/reports/stats" -H "X-Api-Key: $API_KEY" | python3 -m json.tool && echo "" && echo "=== 8. Soft Delete Spam Report ===" && curl -s -X DELETE "$API_URL/reports/r-0fe730fec9d4" \
+>   -H "X-Api-Key: $API_KEY" \
+>   -H "Content-Type: application/json" \
+>   -d '{"reason": "Spam content confirmed", "deleted_by": "admin_somchai"}' | python3 -m json.tool && echo "" && echo "=== 9. Check Stats After Delete ===" && curl -s -X GET "$API_URL/reports/stats" -H "X-Api-Key: $API_KEY" | python3 -m json.tool
+=== 7. Get Stats ===
+{
+    "timestamp": "2026-03-07T16:48:51.603082+00:00",
+    "summary": {
+        "total_received_today": 2,
+        "pending_review": 0,
+        "verified_incidents": 1,
+        "spam_rejected": 1
+    },
+    "trending_keywords": [],
+    "heatmap_data": []
+}
+
+=== 8. Soft Delete Spam Report ===
+{
+    "report_id": "r-0fe730fec9d4",
+    "status": "DELETED",
+    "message": "Report has been archived and removed from public view."
+}
+
+=== 9. Check Stats After Delete ===
+{
+    "timestamp": "2026-03-07T16:48:53.461328+00:00",
+    "summary": {
+        "total_received_today": 2,
+        "pending_review": 0,
+        "verified_incidents": 1,
+        "spam_rejected": 1
+    },
+    "trending_keywords": [],
+    "heatmap_data": []
+}
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$  mkdir -p /home/skoadmin/git-repository/CS366-Serverless-RequestVerifyService/plan/demo1/assets
+(.venv) skoadmin@CodeserverWithDocker:~/git-repository/CS366-Serverless-RequestVerifyService/terraform$ 

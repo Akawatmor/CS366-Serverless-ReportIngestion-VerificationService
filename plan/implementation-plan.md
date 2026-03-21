@@ -93,6 +93,13 @@ External Client
 - Events: `ReportVerifiedEvent`, `ReportStatusChangedEvent`
 - Target: CloudWatch Logs (สำหรับ debugging)
 
+### 2.4 S3 Static Website
+- Bucket: `{prefix}-website-{account_id}` (public read)
+- `/` → Landing page (index.html) — Project info, architecture overview, API docs
+- `/dashboard/` → API Testing Dashboard (dashboard/index.html) — Interactive API tester
+- CORS enabled, Website hosting configuration
+- Files managed by Terraform (`aws_s3_object` with etag for auto-updates)
+
 ---
 
 ## 3. State Machine — Report Lifecycle
@@ -274,7 +281,12 @@ chmod +x scripts/deploy.sh
 │   ├── main.tf, variables.tf, outputs.tf
 │   ├── dynamodb.tf, sqs.tf, eventbridge.tf
 │   ├── iam.tf, lambda.tf, api_gateway.tf
+│   ├── s3.tf                  # S3 static website hosting
 │   └── modules/cors/          # Reusable CORS OPTIONS module
+├── frontend/
+│   ├── index.html             # Landing page (/)
+│   └── dashboard/
+│       └── index.html         # API Testing Dashboard (/dashboard/)
 ├── scripts/
 │   ├── deploy.sh              # One-command deploy
 │   ├── destroy.sh             # Terraform destroy
@@ -322,5 +334,7 @@ chmod +x scripts/deploy.sh
 - [ ] GET /v1/health → status "healthy"
 - [ ] DELETE /v1/reports/{id} → soft delete สำเร็จ
 - [ ] GET /v1/reports/stats → เห็นสถิติ
+- [ ] Website → Landing page แสดงผลถูกต้อง
+- [ ] Dashboard → API Tester ทำงานได้ (ตั้ง API URL + API Key → ส่ง request)
 - [ ] Unit tests pass: `pytest tests/unit/ -v`
 - [ ] Integration tests pass: `pytest tests/integration/ -v`
