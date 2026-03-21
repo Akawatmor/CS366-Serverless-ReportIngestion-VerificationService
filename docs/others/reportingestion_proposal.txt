@@ -2,10 +2,10 @@
 Report Ingestion & Verification Service
 
 1.	Service Owner
--	Censored
+-	Akawat Moradsatian (6609681231)
 2.	Service Purpose
--	บริการนี้ทำหน้าที่เป็น Central Gateway หลักในการรับข้อมูลเหตุภัยพิบัติจากแหล่งข้อมูลภายนอกที่หลากหลาย ไม่ว่าจะเป็น Social Media Scrapers, Mobile Apps หรือ Third-party APIs ผ่านมาตรฐาน API โดยมีกระบวนการจัดการข้อมูลอย่างเป็นระบบ เริ่มต้นจากการใช้ Amazon Comprehend เพื่อทำการจำแนกกลุ่มข้อความเบื้องต้นให้เป็นหมวดหมู่ที่ชัดเจน
--	จากนั้นระบบจะดำเนินการทำความสะอาดข้อมูลและลดความซ้ำซ้อนของรายงานที่ได้รับ และเข้าสู่ขั้นตอนสำคัญคือการประเมินความน่าเชื่อถือ โดยเลือกใช้พลังของ Google Gemini API (gemini-2.5-flash หรือ gemini-2.5-flash-lite) ในการทำ Trust Scoring เพื่อวิเคราะห์และให้น้ำหนักความน่าจะเป็นของเหตุการณ์จริงอย่างแม่นยำ กระบวนการทั้งหมดนี้จะเปลี่ยนจากข้อมูลดิบที่กระจัดกระจายให้กลายเป็นข้อมูลที่ผ่านการกรองและประเมินแล้วก่อนที่จะส่งต่อให้ Incident Service เพื่อนำไปสร้างเป็น Incident สำหรับการบริหารจัดการภัยพิบัติต่อไป
+-	บริการนี้ทำหน้าที่เป็น Central Gateway หลักในการรับข้อมูลเหตุภัยพิบัติจากแหล่งข้อมูลภายนอกที่หลากหลาย ไม่ว่าจะเป็น Social Media Scrapers, Mobile Apps หรือ Third-party APIs ผ่านมาตรฐาน API โดยมีกระบวนการจัดการข้อมูลอย่างเป็นระบบ เริ่มต้นจากการใช้ Google Gemini API เพื่อทำการจำแนกกลุ่มข้อความเบื้องต้นให้เป็นหมวดหมู่ที่ชัดเจน
+-	จากนั้นระบบจะดำเนินการทำความสะอาดข้อมูลและลดความซ้ำซ้อนของรายงานที่ได้รับ และเข้าสู่ขั้นตอนสำคัญคือการประเมินความน่าเชื่อถือ โดยเลือกใช้พลังของ Google Gemini API (gemini-2.5-flash หรือ gemini-2.5-flash-lite หรือ gemini-2.0-flash) ในการทำ Trust Scoring เพื่อวิเคราะห์และให้น้ำหนักความน่าจะเป็นของเหตุการณ์จริงอย่างแม่นยำ กระบวนการทั้งหมดนี้จะเปลี่ยนจากข้อมูลดิบที่กระจัดกระจายให้กลายเป็นข้อมูลที่ผ่านการกรองและประเมินแล้วก่อนที่จะส่งต่อให้ Incident Service เพื่อนำไปสร้างเป็น Incident สำหรับการบริหารจัดการภัยพิบัติต่อไป
 3.	Pain Point ที่แก้ไข
 -	ในสภาวะวิกฤต ปริมาณข้อมูลที่หลั่งไหลเข้ามามีจำนวนมหาศาล (High Throughput) ซึ่งเกินขีดความสามารถและระยะเวลาที่บุคลากรจะสามารถประมวลผลหรือตรวจสอบได้ทันท่วงที
 -	ข้อมูลรายงานกว่าร้อยละ 80 มักปรากฏลักษณะความซ้ำซ้อน (Duplicate) การให้ข้อมูลเท็จ (Fake News) หรือเป็นข้อความขยะ (Spam)
@@ -272,9 +272,9 @@ API Contract #3: Verify Report (Decision)
 -	404 Not Found: ไม่พบ report_id นี้
 -	409 Conflict: รายงานนี้ถูกจัดการไปแล้วโดยผู้อื่น
 {
-"success": False,
-"type": "400",
-"reason": "validate_status is invalid!" 
+  "error": true,
+  "message": "Bad Request",
+  "detail": "validation_status is invalid!"
 }
 
 ในงานพื้นหลัง เมื่อตอบกลับ 200 เรียบร้อยแล้ว ระบบจะทำการ Publish ReportVerifiedEvent ไปยัง Amazon EventBridge เพื่อให้ Incident Service ทำงานต่อทันที
@@ -389,8 +389,7 @@ API Contract #5: Get Dashboard Stats (Summary)
     "verified_incidents": 120,
     "spam_rejected": 1330
   },
-  "trending_keywords": [], 
-// [Planned] อยู่ระหว่างการพัฒนา (Future Enhancement)
+  "trending_keywords": [],
   "heatmap_data": []       
 // [Planned] อยู่ระหว่างการพัฒนา (Future Enhancement)
 }
@@ -409,9 +408,6 @@ API Contract #5: Get Dashboard Stats (Summary)
 7.	Reliability
 -	เพื่อหลีกเลี่ยงการ Scan ตารางรายงานหลัก (Main Table) ซึ่งมีค่าใช้จ่ายสูงและส่งผลต่อ Latency ระบบจึงใช้กลไก Atomic Counter ในตาราง StatsCounter คือ
 	Key Pattern: ใช้รูปแบบ {date}#{stat_name} เช่น 2026-03-03#total_received เพื่อจัดเก็บข้อมูลรายวัน
-
-
-
 
 	Atomic Increment: ระบบประมวลผลหลังบ้าน (Worker) จะใช้คำสั่ง UpdateExpression: ADD stat_value :inc เพื่อเพิ่มจำนวนนับทุกครั้งที่มีการประมวลผลรายงานสำเร็จ ทำให้ข้อมูลแม่นยำแม้มีการส่งข้อมูลเข้ามาพร้อมกันจำนวนมาก
 	Efficiency: เมื่อ API นี้ถูกเรียก ระบบจะใช้ BatchGetItem ดึงเฉพาะ Key ที่เกี่ยวข้องมาแสดงผลทันที ทำให้ได้ความเร็วระดับ Milliseconds โดยไม่โหลดระบบฐานข้อมูลหลัก
@@ -520,7 +516,7 @@ API Contract #7: Health Check
 
 6.	Dependency
 -	Internal AWS Dependencies: Amazon DynamoDB, Amazon SQS, Amazon EventBridge
--	External AI Dependency: Google Gemini API (gemini-2.5-flash หรือ flash-lite )
+-	External AI Dependency: Google Gemini API (gemini-2.5-flash หรือ flash-lite หรือ gemini-2.0-flash)
 7.	Reliability
 -	ระบบจะทำการตรวจสอบสถานะเชิงลึก (Deep Health Check) ในแต่ละส่วนประกอบ คือ
 	DynamoDB (Critical): ใช้คำสั่ง DescribeTable เพื่อตรวจสอบว่า Table Status เป็น ACTIVE หรือไม่
@@ -653,10 +649,10 @@ Message Contract #2: Report Status Change Event
 
 Field	Type	Required	Description	Validation Rules
 report_id	UUID	YES	ID ของ Report ที่ถูกเปลี่ยนสถานะ	Must be valid UUID
-old_status	String	YES	สถานะเดิมก่อนเปลี่ยน	Enum: RECEIVED, PENDING_REVIEW, VERIFIED, SPAM, DUPLICATE
-new_status	String	YES	สถานะใหม่ที่ถูกเปลี่ยน	Enum: RECEIVED, PENDING_REVIEW, VERIFIED, SPAM, DUPLICATE
+old_status	String	YES	สถานะเดิมก่อนเปลี่ยน	Enum: RECEIVED, PENDING_REVIEW, VERIFIED, SPAM, DUPLICATE, REJECTED, DELETED
+new_status	String	YES	สถานะใหม่ที่ถูกเปลี่ยน	Enum: RECEIVED, PENDING_REVIEW, VERIFIED, SPAM, DUPLICATE, REJECTED, DELETED
 reason	String	NO	เหตุผลที่เปลี่ยนสถานะ (สำคัญเวลาโดน Reject)	Max 255 chars
-changed_by	String	YES	ผู้เปลี่ยนสถานะ (คน หรือ AI)	ID ของเจ้าหน้าที่ หรือ 'system_ai'
+changed_by	String	YES	ผู้เปลี่ยนสถานะ (คน หรือ AI)	ID ของเจ้าหน้าที่ หรือ “SYSTEM_AI”
 timestamp	String	YES	เวลาที่เกิดการเปลี่ยนสถานะ	ISO8601 Format
 
 5.	Validation Rules
@@ -679,7 +675,7 @@ geo_location	JSON / Object	Yes	พิกัดละติจูด/ลองจ
 ingested_at	DateTime	Yes	เวลาที่ข้อมูลถูกบันทึกลงระบบ (System Time)	2026-02-18T10:00:00Z
 trust_score	Integer (0-100)	Yes	คะแนนความน่าเชื่อถือที่ AI ประเมิน (ค่าตั้งต้น = 0)	85
 ai_analysis_tags	List/Array	No	ป้ายกำกับที่ AI ตรวจจับได้ (ใช้ช่วย Search/Filter)	["FIRE", "URGENT", "SMOKE"]
-validation_status	String (Enum)	Yes	สถานะปัจจุบันของรายงาน: RECEIVED, PENDING_REVIEW, VERIFIED, SPAM, REJECTED, DUPLICATE	PENDING_REVIEW
+validation_status	String (Enum)	Yes	สถานะปัจจุบันของรายงาน: RECEIVED, PENDING_REVIEW, VERIFIED, SPAM, REJECTED, DUPLICATE, DELETED	PENDING_REVIEW
 verified_by	String	No	ID ของเจ้าหน้าที่/ระบบ ที่ทำการเปลี่ยนสถานะล่าสุด	officer_007
 verification_notes	Text	No	หมายเหตุจากการตรวจสอบ (ทำไมถึงผ่าน/ไม่ผ่าน)	"ยืนยันจากกล้อง CCTV แล้ว"
 linked_incident_id	UUID	No	(Reference) ID ของ Incident จริงที่รายงานนี้ถูกส่งไปรวม	inc-9988-7766
@@ -691,7 +687,6 @@ ai_analysis_failed	Boolean		No	Flag ระบุหากกระบวนก�
 ai_reasoning	String	No	เหตุผลจาก AI ที่อธิบายที่มาของคะแนน	"Detected smoke in image..."
 suggested_category	String (Enum)	No	ประเภทเหตุการณ์ที่ AI แนะนำ	FIRE
 
-ai_analysis_tags	List/Array	No	ป้ายกำกับที่ AI ตรวจจับได้	["FIRE", "SMOKE"]
 
 2.	Report Audit Logs (Owned by this service)
 ตารางจัดเก็บประวัติการเปลี่ยนแปลงข้อมูล เพื่อใช้ในการตรวจสอบย้อนหลัง
@@ -714,3 +709,79 @@ stat_value	Number	Yes	ค่านับสะสม (อัปเดตด้�
 -	Idempotency Strategy: การใช้ source_external_id เป็นหัวใจสำคัญในการรับข้อมูลจาก Social Media หากระบบภายนอกส่งข้อมูลเดิมซ้ำมาหลายครั้ง เราจะใช้ฟิลด์นี้ตรวจสอบก่อนออก report_id ใหม่ เพื่อลดความซ้ำซ้อนตั้งแต่ต้นทาง
 -	Audit Logging Strategy: ทุกการเปลี่ยนแปลงสถานะหรือเนื้อหา จะต้องถูกบันทึกลง Audit Logs เสมอ โดยระบุ action_type ให้ชัดเจน เช่น หากลบข้อมูลจะบันทึกเป็น SOFT_DELETE และหากเป็นการประมวลผลจาก Gemini จะบันทึกเป็น AI_ANALYSIS เพื่อแยกแยะระหว่างการกระทำของมนุษย์และปัญญาประดิษฐ์
 -	Performance Optimization: ตาราง StatsCounter ถูกแยกออกมาเพื่อแก้ปัญหา Performance ในการทำ Dashboard โดยเฉพาะ ทำให้เราสามารถแสดงผล "ยอดรวมผู้แจ้งเหตุวันนี้" ได้ภายในเวลาไม่กี่มิลลิวินาที
+ 
+Service Architecture
+1.	ภาพแสดงการทำงานของแต่ละ Function
+
+// Picture Will be shown here
+
+
+2.	Components
+-	User / Client
+	External Sources: Social Media Scrapers, Mobile Apps ที่ส่งข้อมูลเข้ามา
+	Trust Officer: เจ้าหน้าที่ผู้ใช้งานผ่านหน้า Web Dashboard เพื่อตรวจสอบข้อมูล
+-	Amazon API Gateway
+	ทำหน้าที่เป็นประตูหลัก (Entry Point) รับคำขอทั้งแบบ Synchronous (จากเจ้าหน้าที่) และ Asynchronous Ingestion (จาก Bot)
+-	Amazon SQS (report-ingestion-queue)
+	คิวสำหรับพักข้อมูล (Buffer) จาก External Sources เพื่อรองรับ Traffic มหาศาล (Spike Traffic) ป้องกันระบบล่ม และช่วยลด Rate Limit
+-	AWS Lambda (Ingestion Worker)
+	ฟังก์ชันเบื้องหลังที่ตื่นขึ้นมาเมื่อมีข้อมูลใน SQS ทำหน้าที่เรียก AI มาประมวลผล (Scoring), ตรวจสอบข้อมูลซ้ำ (Deduplicate), และบันทึกลงฐานข้อมูล
+-	Amazon DynamoDB (Reports Table)
+	ฐานข้อมูล NoSQL หลักของ Service เก็บข้อมูล Reports ทั้งหมด, สถานะการตรวจสอบ, และ Audit Logs รองรับการอ่าน/เขียนความเร็วสูง
+-	AWS Lambda (API Handler)
+	ฟังก์ชันสำหรับให้บริการหน้า Dashboard (Get List, View Detail) และประมวลผลคำสั่งยืนยัน (Verify) จากเจ้าหน้าที่
+-	Amazon EventBridge (Custom Event Bus)
+	ช่องทางสื่อสารหลักไปยัง Service อื่นๆ (Event Bus) เมื่อมีการยืนยันข้อมูล (Verified) ระบบจะส่งข้อมูลบอก EventBridge เพื่อให้ Service ปลายทาง (เช่น Incident Service) มารับข้อมูลไปทำงานต่อ
+-	Google Gemini API
+3.	Explanation เพิ่มเติม
+-	สถาปัตยกรรมของ Report Ingestion & Verification Service ถูกออกแบบโดยเน้นความทนทาน (Resilience) และการแยกส่วนการทำงาน (Decoupling) โดยแบ่งออกเป็น 3 ส่วนหลัก ดังนี้ คือ
+1.	ส่วนการรับข้อมูลและประมวลผลเบื้องต้น (Asynchronous Ingestion)
+เนื่องจากการแจ้งเหตุภัยพิบัติมักมีปริมาณมหาศาลและมาพร้อมกันในเวลาสั้นๆ (Traffic Spikes) ระบบจึงใช้ Amazon SQS เข้ามาคั่นกลางระหว่าง API Gateway และส่วนประมวลผล เมื่อ External Sources ส่งข้อมูลเข้ามา API Gateway จะส่งข้อมูลลง SQS และตอบกลับทันที (202 Accepted) เพื่อลดระยะเวลารอคอย จากนั้น AWS Lambda (Ingestion Worker) จะดึงข้อมูลจาก SQS ไปประมวลผลทีละ Batch โดยมีการเรียกใช้ Google Gemini API เพื่อวิเคราะห์ความน่าเชื่อถือ (Trust Score) และตรวจสอบความซ้ำซ้อนกับข้อมูลใน Amazon DynamoDB ก่อนบันทึก กระบวนการนี้ช่วยให้ระบบรองรับ Load ได้ไม่จำกัดโดยไม่กระทบต่อฐานข้อมูลหลัก
+2.	ส่วนการตรวจสอบและบริหารจัดการ (Synchronous Management)
+สำหรับเจ้าหน้าที่ (Trust Officer) ที่ต้องคัดกรองข้อมูล ระบบใช้รูปแบบ REST API ผ่าน API Gateway เชื่อมต่อกับ AWS Lambda (API Handler) โดยตรง เพื่อดึงรายการที่ AI คัดกรองแล้ว (Pending Review) มาแสดงผล และรองรับคำสั่งตรวจสอบยืนยัน (Verify) หรือปฎิเสธ (Reject) โดยมีการอ่านและอัปเดตสถานะลงใน DynamoDB แบบ Real-time เพื่อให้เจ้าหน้าที่เห็นสถานะล่าสุดทันที
+3.	ส่วนการส่งต่อข้อมูล (Event-Driven Broadcast)
+เมื่อเจ้าหน้าที่ทำการยืนยันข้อมูล (Status = VERIFIED) ระบบจะไม่เรียก API ของ Service อื่นโดยตรง (เพื่อป้องกันการผูกติดกันเกินไป) แต่ AWS Lambda จะทำการ Publish Event ชื่อ ReportVerified ไปยัง Amazon EventBridge ซึ่งทำหน้าที่เป็น Router กลาง เพื่อกระจายข่าวดังกล่าวไปยัง Service ที่เกี่ยวข้อง (เช่น Incident Tracking Service) ให้นำข้อมูลไปสร้าง Incident ต่อไป รูปแบบนี้ช่วยให้ระบบมีความเป็นอิสระ (Autonomy) และง่ายต่อการขยาย Service ใหม่ๆ ในอนาคต
+ 
+Service Interaction
+1.	ภาพ Diagram 
+-	(คำอธิบายสำหรับการวาด)
+Center Node: Report Ingestion & Verification Service (Service ของคุณ)
+Left Side (Upstream - ผู้เรียกใช้งานเรา):
+DisasterMonitoring Service (IoT/Sensors) → ชี้มาที่ Service คุณ (เส้นทึบ: HTTP POST)
+Operation Update Service (Dashboard) → ชี้มาที่ Service คุณ (เส้นทึบ: HTTP GET)
+External Sources (Mock Bots/Apps) → ชี้มาที่ Service คุณ (เส้นทึบ: HTTP POST)
+Right Side (Downstream - เราส่งข้อมูลไปหา):
+Service คุณ → ชี้ไปที่ IncidentTracking Service (เส้นประ: Async Event ReportVerified) (เส้นหลัก)
+Service คุณ → ชี้ไปที่ RescueRequest Service (เส้นประ: Async Event ReportVerified เฉพาะเคสขอความช่วยเหลือ)
+Service คุณ → ชี้ไปที่ PropertyDamageReport Service (เส้นประ: Async Event ReportVerified เฉพาะเคสทรัพย์สินเสียหาย)
+2.	Upstream Services 
+-	(บริการต้นทางที่เรียกใช้งาน Report Ingestion & Verification Service)
+-	DisasterMonitoring Service (IoT & Sensors)
+	Interaction Type: Synchronous (HTTP POST)
+	Action: เรียกใช้งาน API POST /reports
+	Description: เมื่อ Sensor ตรวจจับความผิดปกติได้ (เช่น ระดับน้ำสูงเกินพิกัด) Service นี้จะส่งข้อมูลดิบเข้ามาเป็น "Report" หนึ่งรายการ เพื่อให้ Service ของคุณทำการประเมินร่วมกับข้อมูลจาก Social Media ว่าเป็นเหตุการณ์จริงหรือไม่ (Data Correlation)
+-	Operation Update Service (Command Center Dashboard)
+	Interaction Type: Synchronous (HTTP GET)
+	Action: เรียกใช้งาน API GET /reports/stats หรือ GET /reports?status=PENDING
+	Description: ดึงข้อมูลสถิติยอดรวมรายงาน (Total Reports), พื้นที่ที่มีการแจ้งเหตุหนาแน่น (Heatmap Data), และรายการที่รอการตรวจสอบ เพื่อนำไปแสดงผลบน Dashboard ให้ผู้บัญชาการเห็นภาพรวมสถานการณ์ข่าวสาร (Situational Awareness)
+3.	Downstream Services 
+-	(บริการปลายทางที่ Report Ingestion & Verification Service เรียกหรือส่งข้อมูลไป)
+-	IncidentTracking Service (Consumer หลัก)
+	Interaction Type: Asynchronous (Event-Driven ผ่าน EventBridge/PubSub)
+	Event Name: ReportVerified (Topic: report.verified)
+	Description: นี่คือหัวใจสำคัญของการเชื่อมต่อ เมื่อรายงานได้รับการยืนยัน (Status = VERIFIED) Service ของคุณจะประกาศ Event ออกไป IncidentTracking Service จะรับข้อมูลนี้ (Subscribe) เพื่อนำไป "สร้าง Incident ใหม่" (Create New Incident) หรือ "อัปเดตข้อมูล Incident เดิม" (Merge Info) โดยอัตโนมัติ ทำให้ข้อมูลไหลลื่นโดยไม่ต้องรอ API ตอบกลับ
+-	RescueRequest Service (Consumer รอง - เฉพาะเหตุ SOS)
+	Interaction Type: Asynchronous (Event-Driven)
+	Event Name: ReportVerified (Filter: type=SOS or severity=CRITICAL)
+	Description: หากรายงานที่ผ่านการ Verify แล้วมีเนื้อหาขอความช่วยเหลือเร่งด่วน (เช่น "ติดอยู่บนหลังคา", "คนแก่ป่วยหนัก") Service นี้จะดักจับ Event ดังกล่าวเพื่อนำไปสร้างเป็น "ใบงานกู้ภัย" (Rescue Ticket) ทันที เพื่อลดขั้นตอนการคีย์ข้อมูลซ้ำซ้อน
+-	PropertyDamageReport Service (Consumer รอง - เฉพาะเหตุความเสียหาย)
+	Interaction Type: Asynchronous (Event-Driven)
+	Event Name: ReportVerified (Filter: type=DAMAGE)
+	Description: หากรายงานเป็นเรื่องสิ่งปลูกสร้างเสียหาย (เช่น "ถนนขาด", "สะพานพัง", "บ้านถล่ม") แต่ไม่มีผู้บาดเจ็บ ข้อมูลจะถูกส่งต่อไปยัง Service นี้เพื่อบันทึกเป็นรายการความเสียหายรอการซ่อมแซมหรือประเมินมูลค่า
+-	Incident Service (Reference Check - Optional but Good)
+	Interaction Type: Synchronous (HTTP GET)
+	Action: เรียกใช้งาน API GET /incidents?active=true
+	Description: ในขั้นตอนที่เจ้าหน้าที่กำลังจะกด Verify และต้องการ Link ข้อมูลเข้ากับ Incident เดิม หน้า Dashboard ของคุณอาจจะเรียก API นี้เพื่อดึงรายชื่อ Incident ที่เปิดอยู่มาให้เจ้าหน้าที่เลือก (Dropdown List) เพื่อความถูกต้องของข้อมูล (Data Consistency)
+4.	เหตุผลที่ออกแบบแบบนี้ (Technical Rationale)
+-	การใช้ Asynchronous Event (ReportVerified) ส่งออกไปให้หลายๆ Service (IncidentTracking, RescueRequest, PropertyDamage) พร้อมกัน เรียกว่ารูปแบบ "Fan-out Pattern"
+-	ข้อดีคือ ReportVerify ไม่ต้องรู้ Logic ของเพื่อน หน้าที่จบแค่บอกว่าข่าวนี้จริง ใครอยากได้ข้อมูล (Incident, Rescue, Damage) ก็มารับไปจัดการต่อเอง ถ้าระบบกู้ภัย (RescueRequest) ล่ม ระบบของคุณก็ยังทำงานต่อได้ ไม่พังตามกัน (Fault Isolation)

@@ -77,7 +77,7 @@
 
 | Endpoint | URL |
 |----------|-----|
-| API Base | `https://s4favly0y4.execute-api.us-east-1.amazonaws.com/dev/v1` |
+| API Base | `https://s73yua5br2.execute-api.us-east-1.amazonaws.com/dev/v1` |
 | Website | `http://report-verify-dev-website-035136704221.s3-website-us-east-1.amazonaws.com` |
 | Dashboard | เดียวกัน + `/dashboard/` |
-| API Key | `Et5NVu8sSb5omOGpznV4ZaluCUO9YBuP8kEV9ATE` (Header: `X-Api-Key`) |
+| API Key | `bLXlrW1I9f34khMEw1ZZoa7iVvIy1rrH9raK3bcZ` (Header: `X-Api-Key`) |

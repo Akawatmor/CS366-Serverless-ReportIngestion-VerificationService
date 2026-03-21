@@ -30,12 +30,19 @@ ANALYSIS_PROMPT = """You are a disaster report verification AI. Analyze the foll
 **Location (lat, lon):** {lat}, {lon}
 **Reported Time:** {timestamp}
 
+**Attached Media URLs:** {media_urls}
+
+**Reporter History:**
+{reporter_history}
+
 **Instructions:**
 1. Evaluate the credibility of this report on a scale of 0-100 (trust_score).
+   - Consider the reporter's past history: repeated spam submissions lower trust; a track record of verified reports increases trust.
+   - If media evidence URLs are attached, acknowledge their presence (higher trust if photos/video are included).
 2. Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
 3. Extract important keywords (Thai or English).
-4. Provide a brief reasoning for your trust score.
-5. Detect if this looks like spam, fake news, or a duplicate pattern.
+4. Provide a brief reasoning for your trust score, including how reporter history and media affected your decision.
+5. Detect if this looks like spam, fake news, or a duplicate pattern. Consider repeat offenders.
 
 **Respond ONLY with valid JSON in this exact format:**
 {{
@@ -213,6 +220,8 @@ class GeminiService:
         lat: float | None = None,
         lon: float | None = None,
         timestamp: str = "",
+        media_urls: list[str] | None = None,
+        reporter_history: str = "",
     ) -> dict[str, Any]:
         """
         Send report content to Gemini for trust scoring analysis.
@@ -229,6 +238,14 @@ class GeminiService:
 
         start_time = time.time()
 
+        # Format media URLs for prompt
+        media_str = "None"
+        if media_urls:
+            media_str = "\n".join(f"  - {url}" for url in media_urls[:10])
+
+        # Format reporter history
+        history_str = reporter_history or "No prior reports from this reporter."
+
         try:
             prompt = ANALYSIS_PROMPT.format(
                 content=content or "(no text content)",
@@ -237,6 +254,8 @@ class GeminiService:
                 lat=lat or "N/A",
                 lon=lon or "N/A",
                 timestamp=timestamp or "N/A",
+                media_urls=media_str,
+                reporter_history=history_str,
             )
 
             response_text = self._call_gemini(prompt)

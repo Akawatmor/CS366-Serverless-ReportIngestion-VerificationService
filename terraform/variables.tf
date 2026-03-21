@@ -21,22 +21,8 @@ variable "aws_region" {
 }
 
 # --- Gemini AI (multi-key rotation + model fallback) ---
-variable "gemini_api_key1" {
-  description = "Primary Gemini API key"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "gemini_api_key2" {
-  description = "Secondary Gemini API key"
-  type        = string
-  sensitive   = true
-  default     = ""
-}
-
-variable "gemini_api_key3" {
-  description = "Tertiary Gemini API key (optional)"
+variable "gemini_api_keys" {
+  description = "Comma-separated list of Gemini API keys (supports 1..9999 keys for rotation)"
   type        = string
   sensitive   = true
   default     = ""

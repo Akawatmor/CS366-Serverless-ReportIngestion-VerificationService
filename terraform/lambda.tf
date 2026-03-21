@@ -36,9 +36,7 @@ resource "aws_lambda_function" "ingestion_worker" {
       STATS_TABLE     = aws_dynamodb_table.stats.name
       SQS_QUEUE_URL   = aws_sqs_queue.ingestion_queue.url
       EVENT_BUS_NAME  = aws_cloudwatch_event_bus.disaster_bus.name
-      GEMINI_API_KEY1 = var.gemini_api_key1
-      GEMINI_API_KEY2 = var.gemini_api_key2
-      GEMINI_API_KEY3 = var.gemini_api_key3
+      GEMINI_API_KEYS = var.gemini_api_keys
       GEMINI_MODEL    = var.gemini_model
       GEMINI_MODEL_FALLBACKS = var.gemini_model_fallbacks
       TRUST_AUTO_REJECT   = tostring(var.trust_auto_reject)
@@ -89,9 +87,8 @@ resource "aws_lambda_function" "api_handler" {
       AUDIT_TABLE    = aws_dynamodb_table.audit_logs.name
       STATS_TABLE    = aws_dynamodb_table.stats.name
       EVENT_BUS_NAME = aws_cloudwatch_event_bus.disaster_bus.name
-      GEMINI_API_KEY1 = var.gemini_api_key1
-      GEMINI_API_KEY2 = var.gemini_api_key2
-      GEMINI_API_KEY3 = var.gemini_api_key3
+      MEDIA_BUCKET   = aws_s3_bucket.media.id
+      GEMINI_API_KEYS = var.gemini_api_keys
       GEMINI_MODEL    = var.gemini_model
       GEMINI_MODEL_FALLBACKS = var.gemini_model_fallbacks
       LOG_LEVEL      = "INFO"
@@ -158,9 +155,7 @@ resource "aws_lambda_function" "health_handler" {
       REPORTS_TABLE  = aws_dynamodb_table.reports.name
       SQS_QUEUE_URL  = aws_sqs_queue.ingestion_queue.url
       EVENT_BUS_NAME = aws_cloudwatch_event_bus.disaster_bus.name
-      GEMINI_API_KEY1 = var.gemini_api_key1
-      GEMINI_API_KEY2 = var.gemini_api_key2
-      GEMINI_API_KEY3 = var.gemini_api_key3
+      GEMINI_API_KEYS = var.gemini_api_keys
       GEMINI_MODEL    = var.gemini_model
       GEMINI_MODEL_FALLBACKS = var.gemini_model_fallbacks
       LOG_LEVEL      = "INFO"

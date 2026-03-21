@@ -1,0 +1,372 @@
+ภาพรวมของบริการ IncidentTracking Service
+1. Service Owner
+นายกฤตเมธ ดําทองคํา (มาร์ค) รหัสนักศึกษา 6609490062 ภาคปกติ
+2. Service Purpose
+IncidentTracking Service เป็นบริการที่ทําหน้าที่เป็นแหล่งข้อมูลหลักส่วนกลาง สําหรับการสร้าง
+เหตุการณ์ฉุกเฉิน การจัดการสถานะวงจรชีวิตของเหตุการณ์และการบันทึกลําดับเหตุการณ์ตามลําดับ
+เวลา เพื่อประสานงานร่วมกับทุก Service ในระบบ
+3. Pain Point ที่แก้ไข
+เวลาเกิดเหตุการณ์ภัยพิบัติข้อมูลมักกระจัดกระจายและขาดความน่าเชื่อถือ หน่วยงานที่เกี่ยวข้อง ขาด
+ศูนย์กลางในการตรวจสอบว่าเกิดอะไรขึ้น ที่ไหน สถานะปัจจุบันคืออะไร และมีใครทําอะไรไปแล้วบ้าง
+ทําให้เกิดความซํ้าซ้อนและล่าช้า
+4. Target Users
+- Other Microservices บริการอื่น ๆ ในระบบ ReportVerify Service ส่งข้อมูลมาสร้าง Incident,
+MissionProgress Service ส่ง Log มาอัปเดต Timeline, Shelter Service / Donation Service
+ดึงสถานะไปตรวจสอบก่อนรับคน/รับบริจาค
+
+5. Service Boundary
+- In-scope Responsibilities (สิ่งที่บริการนี้รับผิดชอบ)
+• จัดเก็บข้อมูลหลักของเหตุการณ์
+• จัดการสถานะวงจรชีวิต
+• จัดการประวัติการดําเนินการ
+- Out-of-scope / Not Responsible For (ไม่รับผิดชอบ)
+• การคัดกรองข่าวปลอม (เป็นหน้าที่ของ ReportVerify Service)
+• การประเมินความสําคัญของทีมกู้ภัย (เป็นหน้าที่ของ Rescue Prioritization Service)
+
+6. Autonomy / Decision Logic
+- มีสิทธิ์ในการปฏิเสธการอัปเดตสถานะที่ข้ามขั้นตอน (เช่น จาก REPORTED กระโดดไป CLOSED
+โดยไม่มีการลงพื้นที่)
+- ระบบจะทําการเพิ่ม Timeline Record อัตโนมัติในทุก ๆ ครั้งที่มีการเปลี่ยน Status
+
+7. Owned Data
+- Incident Master Data
+ข้อมูลหลักของเหตุการณ์เช่น incident_id, type, description, location, impact_level ซึ่ง
+บริการนี้เป็นผู้สร้าง และดูแลความถูกต้องแต่เพียงผู้เดียว
+- Incident Lifecycle State
+สถานะปัจจุบัน (status) ของภัยพิบัติที่เกิดขึ้น
+- Event Timeline Records
+อาร์เรย์ลําดับของเหตุการณ์ (timeline) ที่บันทึกประวัติการแก้ไขปัญหา
+
+8. Linked Data (Reference Only)
+- reported_by: อาจจะอ้างอิงถึง user_id หรือชื่อ Service ที่แจ้งเข้า
+9. Non-Functional Requirements
+- ระบบต้องพร้อมใช้งานตลอดเวลาเพื่อรับแจ้งเหตุ
+- สถานะ และข้อมูลไทม์ไลน์ต้องสอดคล้องกันเสมอ
+- ต้องรองรับการส่งข้อมูลซํ้าโดยไม่ทําให้เกิด Incident หรือ Timeline ซํ้าซ้อน
+- ต้องสามารถ Publish Event ไปยัง Message Broker ได้รวดเร็ว เพื่อให้ระบบแจ้งเตือนทํางานได้
+ทันที
+
+Synchronous Function Contract
+Base URL:
+API Contract #1: Create New Incident
+ข้อมูลทั่วไป
+Name: Create Incident
+Method:
+Path:
+Type: Synchronous
+คําอธิบาย
+รับข้อมูลที่ผ่านการตรวจสอบแล้ว มาสร้างเป็นเหตุการณ์ฉุกเฉินอย่างเป็นทางการ ระบบจะสร้าง
+ประวัติแรกใน Timeline ให้อัตโนมัติ
+Request
+Headers
+
+Body
+
+Response
+Success 201 Created
+Accept: application/json
+Content-Type: application/json
+Authorization: Bearer [ACCESS_TOKEN]
+X-IncidentTNX-Id: 123E4567-E89B-12D3-A456-426614174000
+
+{
+"incident_type": "fire",
+"incident_description": "Fire reported near TU Dome (Verified)",
+"exact_location": "14.0649,100.6003",
+"exact_location_description": "TU Dome’s outdoor parking lot",
+"impact_level": 3,
+"priority": "High",
+"reported_by": "ReportVerifyService"
+}
+
+{
+"incident_id": "019C774D-1AC5-75BB-AE95-5CD4AEB8925B",
+"status": "REPORTED",
+"created_at": "2026-02-22T00:00:00Z",
+"message": "Incident created successfully"
+}
+https://incident-service.krittamark.com/api/v1
+
+/incidents
+POST
+
+Error Schema
+
+Dependency / Reliability
+- ไม่มีการเรียก Service อื่น เพื่อให้ระบบทํางานได้เร็วที่สุดและไม่พังตาม Service อื่น
+- ระบบจะตรวจสอบ X-IncidentTNX-Id ใน Header หากส่ง ID ซํ้าเข้ามา ระบบจะตอบ 201
+Success โดยไม่สร้าง Incident ซํ้าซ้อน
+- Timeout: 5 วินาที
+- มีการจํากัดจํานวน Request ต่อวินาที
+{
+"error": {
+"code": "ERROR_CODE_STRING",
+"message": "Human-readable error description",
+"details": [ "Additional details (if any)" ],
+"trace_id": "req-uuid-for-log-tracing"
+}
+}
+
+API Contract #2: Get Incident Details
+ข้อมูลทั่วไป
+Name: Get Incident
+Method:
+Path:
+Type: Synchronous
+คําอธิบาย
+ดึงข้อมูลรายละเอียดของเหตุการณ์รวมถึง Timeline ทั้งหมด ให้Service อื่น ตรวจสอบสถานะ
+ว่าเหตุการณ์จบลงหรือยัง
+Request
+Headers
+
+Path Param
+- incident_id string (Required) รหัส UUID สําหรับระบุภัยพิบัติ
+
+Response
+Success 200
+Accept: application/json
+Content-Type: application/json
+Authorization: Bearer [ACCESS_TOKEN]
+X-IncidentTNX-Id: 123E4567-E89B-12D3-A456-426614174000
+
+{
+"incident_id": "019C774D-1AC5-75BB-AE95-5CD4AEB8925B",
+"incident_type": "fire",
+"incident_description": "Fire reported near TU Dome (Verified)",
+"exact_location": "14.0649,100.6003",
+"exact_location_description": "TU Dome’s outdoor parking lot",
+"impact_level": 3,
+"priority": "High",
+"status": "DISPATCHED",
+"reported_by": "ReportVerifyService",
+"created_at": "2026-02-22T00:00:00Z",
+"updated_at": "2026-02-22T00:01:04Z",
+"timeline": [
+{
+"time": "2026-02-22T00:00:00Z ",
+"event": "Created",
+"detail": "Incident verified"
+},
+{
+"time": "2026-02-22T00:01:04Z ",
+"event": "Status Changed",
+"detail": "DISPATCHED"
+}
+]
+}
+/incidents/{incident_id}
+GET
+
+Error Schemas
+
+Dependency / Reliability
+- ไม่มีการเรียก Service อื่น
+- Timeout: 3 วินาที
+- อาจมีการทํา Cache ข้อมูลชั่วคราว
+{
+"error": {
+"code": "ERROR_CODE_STRING",
+"message": "Human-readable error description",
+"details": [ "Additional details (if any)" ],
+"trace_id": "req-uuid-for-log-tracing"
+}
+}
+
+API Contract #3: Update Incident Status & Timeline
+ข้อมูลทั่วไป
+Name: Update Status & Timeline
+Method:
+Path:
+Type: Synchronous
+คําอธิบาย
+ใช้เปลี่ยนสถานะเหตุการณ์เมื่ออัปเดตสถานะสําเร็จ ระบบจะนํา detail ไปต่อท้ายในอาร์เรย์
+Timeline อัตโนมัติ
+Request
+Headers
+
+Path Param
+- incident_id string (Required) รหัส UUID สําหรับระบุภัยพิบัติ
+Body
+Accept: application/json
+Content-Type: application/json
+Authorization: Bearer [ACCESS_TOKEN]
+X-IncidentTNX-Id: 123E4567-E89B-12D3-A456-426614174000
+
+{
+"status": "ON-SITE",
+"updated_by": "RescueTeam-A",
+"detail": "Team arrived at location, setting up perimeter."
+}
+/incidents/{incident_id}
+PATCH
+
+Response
+Success 200
+
+Error Schemas
+
+Dependency / Reliability
+- ไม่มีการเรียก Service อื่น
+- หากส่ง Payload เดิมเข้ามาซํ้า ระบบจะไม่เอา detail ไปต่อท้าย Timeline เพิ่มอีก
+- ป้องกัน Race Condition เพื่อป้องกันกรณี2 หน่วยงานกดอัปเดตสถานะพร้อมกันในเสี้ยววินาที
+- Timeout: 5 วินาที
+{
+"incident_id": "019C774D-1AC5-75BB-AE95-5CD4AEB8925B",
+"incident_type": "fire",
+"incident_description": "Fire reported near TU Dome (Verified)",
+"exact_location": "14.0649,100.6003",
+"exact_location_description": "TU Dome’s outdoor parking lot",
+"impact_level": 3,
+"priority": "High",
+"status": "ON-SITE",
+"reported_by": "ReportVerifyService",
+"created_at": "2026-02-22T00:00:00Z",
+"updated_at": "2026-02-22T00:15:00Z",
+"timeline": [
+{
+"time": "2026-02-22T00:00:00Z ",
+"event": "Created",
+"detail": "Incident verified"
+},
+{
+"time": "2026-02-22T00:01:04Z ",
+"event": "Status Changed",
+"detail": "DISPATCHED"
+},
+{
+"time": "2026-02-22T00:15:00Z ",
+"event": "Status Changed",
+"detail": "Team arrived at location, setting up perimeter."
+}
+]
+}
+
+{
+"error": {
+"code": "ERROR_CODE_STRING",
+"message": "Human-readable error description",
+"details": [ "Additional details (if any)" ],
+"trace_id": "req-uuid-for-log-tracing"
+}
+}
+
+Asynchronous Function Contract
+Message Contract #1: Incident Created Event
+ข้อมูลทั่วไป
+Message Name: IncidentCreated
+Interaction Style: Publish-Subscribe
+Producer: IncidentTracking Service
+Consumer:
+- Manage Dispatch Service
+- RecommendRescueTeam Service
+- EmergencyAlert Service / Notification
+Channel/Queue: incident.core.events.v1
+คําอธิบาย
+ส่งข้อมูลเหตุการณ์ภัยพิบัติที่ได้รับการยืนยัน และสร้างขึ้นใหม่ในระบบอย่างเป็นทางการ เพื่อให้
+Service อื่น ๆ ได้รับทราบและเริ่มกระบวนการทํางานของตนเอง โดยจะไม่รอผลลัพธ์ตอบกลับ
+จากผู้รับ
+Message Body
+{
+"eventId": "8B9E4B0D-3B7E-4A0D-9D9F-3F5C6A2A3E10",
+"eventType": "INCIDENT_CREATED",
+"sentAt": "2026-02-22T00:00:00Z",
+"data": {
+"incident_id": "019C774D-1AC5-75BB-AE95-5CD4AEB8925B",
+"incident_type": "fire",
+"incident_description": "Fire reported near TU Dome (Verified)",
+"exact_location": "14.0649,100.6003",
+"exact_location_description": "TU Dome’s outdoor parking lot",
+"impact_level": 3,
+"priority": "High",
+"status": "DISPATCHED",
+"reported_by": "ReportVerifyService",
+"created_at": "2026-02-22T00:00:00Z",
+}
+}
+
+Field Definition:
+
+Field Type Required Description
+eventId UUID Y รหัสประจําตัวของ Event นี้
+eventType string Y ระบุประเภท Event ค่าคงที่เป็น "INCIDENT_CREATED"
+sentAt datetime Y เวลาที่ระบบสร้างและ Publish Event นี้ (ISO-8601)
+data.incident_id UUIDv7 Y รหัสอ้างอิงของเหตุการณ์ภัยพิบัติที่ถูกสร้างใหม่
+data.incident_type string Y ประเภทของภัยพิบัติเช่น fire, flood, generic
+data.incident_description string Y รายละเอียดของเหตุการณ์ที่เกิดขึ้น
+data.exact_location string Y พิกัด Lat, Long
+data.exact_location_descript
+ion
+
+string N จุดสังเกตเพิม่ เติม
+data.impact_level integer Y ระดับผลกระทบ (1-4)
+data.priority string Y ความเร่งด่วน (Low, Medium, High, Critical)
+data.status string Y สถานะปัจจุบัน
+data.reported_by string Y ต้นทางที่แจ้งเหตุ
+data.created_at datetime Y เวลาอัปเดตล่าสุด
+Validation Rules
+1. eventId ต้องไม่ซํ้ากับ Event ที่เคยประมวลผลไปแล้ว เพื่อป้องกันการแจ้งเตือนซํ้าซ้อน
+2. data.incidentId ต้องไม่ว่าง และต้องเป็นรูปแบบ UUID ที่ถูกต้อง
+3. data.exact_location ต้องอยู่ในรูปแบบ รูปแบบ "Lat,Lng" โดยที่ Lat มีค่าตั้งแต่ -90 ถึง 90
+และ Lng มีค่าตั้งแต่ -180 ถึง 180
+4. data.priority ต้องตรงตาม Enum ที่กําหนดเท่านั้น
+
+Message Contract #2: Incident Status Changed Event
+ข้อมูลทั่วไป
+Message Name: IncidentStatusChanged
+Interaction Style: Publish-Subscribe
+Producer: IncidentTracking Service
+Consumer:
+- Donation Tracking Service
+- Shelter Capacity Service
+Channel/Queue: incident.core.events.v1
+Version: v1
+คําอธิบาย
+ส่งข้อมูลอัปเดตสถานะของเหตุการณ์ภัยพิบัติเมื่อมีการเปลี่ยนแปลงเพื่อให้Service ที่เกี่ยวข้อง
+ทราบความคืบหน้าแบบ Real-time และสามารถนําไปตัดสินใจต่อได้
+Message Body
+
+Field Definition:
+
+Field Type Required Description
+eventId UUID Y รหัสประจําตัวของ Event นี้
+eventType string Y ระบุประเภท Event ค่าคงที่เป็น "INCIDENT_CREATED"
+sentAt datetime Y เวลาที่ระบบสร้างและ Publish Event นี้ (ISO-8601)
+data.incident_id UUIDv7 Y รหัสอ้างอิงของเหตุการณ์ที่มีการเปลี่ยนสถานะ
+data.old_status string Y สถานะเดิมก่อนการเปลี่ยนแปลง
+data.new_status string Y สถานะใหม่ที่ถูกอัปเดต
+data.updated_by string Y ผู้ที่ทําการอัปเดตสถานะ
+data.detail string N คําอธิบายรายละเอียดที่ถูกบันทึกลงใน Timeline เพิม่ เติม
+{
+"eventId": "9C8F5C1E-4C8F-5B1E-0E0G-4G6D7B3B4F21",
+"eventType": "STATUS_CHANGED",
+"sentAt": "2024-10-27T10:15:02Z",
+"data": {
+"incident_id": "019C774D-1AC5-75BB-AE95-5CD4AEB8925B",
+"old_status": "DISPATCHED",
+"new_status": "ON-SITE",
+"updated_by": "RescueTeam-A",
+"detail": "Team arrived at location, setting up perimeter."
+}
+}
+
+Validation Rules
+1. eventId ต้องไม่ซํ้ากับ Event ที่เคยเกิดขึ้นไปแล้ว
+2. data.new_status ต้องเป็นค่าสถานะที่ถูกต้องตาม Workflow มาตรฐาน(REPORTED,
+DISPATCHED, ON-SITE, RESOLVED, CLOSED)
+3. data.old_status และ data.new_status ต้องไม่เป็นค่าเดียวกัน
+
+IncidentTracking Service Data
+1) Incident Master Data (Owned by this service)
+Field Name Type Required Description Example
+incident_id UUIDv7 Y Primary Key 019C774D-1AC5-75BB-AE95-5CD4AEB8925B
+incident_type string Y Category of incident flood, fire, generic
+incident_description string Y รายละเอียดเหตุการณ์ Heavy rainfall caused flooding
+exact_location string Y พิกัด Lat, Long 13.7563, 100.5018
+exact_location_description string N จุดสังเกตเพิม่ เติม ตรงข้ามเซเว่น ซอย 5
+impact_level integer Y ระดับผลกระทบ (1-4) 3
+priority string Y ความเร่งด่วน (Low, Medium, High, Critical) High
+status string Y สถานะปัจจุบัน REPORTED, DISPATCHED, ON-SITE, RESOLVED, CLOSED
+reported_by string Y ต้นทางที่แจ้งเหตุ ReportVerifyService, Citizen_01
+timeline JSON Array Y ลําดับเหตกุ ารณ์ทงั้ หมด [{ "time": "...", "event": "...", "detail": "..." }]
+created_at datetime Y เวลาที่สร้าง Incident 2026-02-22T00:00:00Z
+updated_at datetime Y เวลาอัปเดตล่าสุด 2026-02-22T00:15:00Z

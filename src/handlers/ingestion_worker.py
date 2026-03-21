@@ -93,6 +93,10 @@ def _process_single_report(
 
     # --- 2. Call Gemini AI for trust scoring ---
     geo = body.get("geo_location") or {}
+
+    # --- 2a. Fetch reporter history for enhanced SPAM detection ---
+    reporter_history = _get_reporter_history(dynamodb, body.get("reporter_id", ""))
+
     ai_result = gemini_service.analyze_report(
         content=body.get("raw_content", ""),
         source=body.get("reporter_source", ""),
@@ -100,6 +104,8 @@ def _process_single_report(
         lat=geo.get("lat"),
         lon=geo.get("lon"),
         timestamp=body.get("timestamp", ""),
+        media_urls=body.get("media_urls", []),
+        reporter_history=reporter_history,
     )
 
     # --- 3. Deduplication (geo + time) ---
@@ -230,3 +236,50 @@ def _increment_stat(dynamodb, stat_key: str) -> None:
         )
     except Exception as e:
         logger.error(f"Failed to update stat counter: {e}")
+
+
+def _get_reporter_history(dynamodb, reporter_id: str) -> str:
+    """
+    Fetch past reports from the same reporter_id to provide historical
+    context for SPAM detection. Returns a human-readable summary string.
+    """
+    if not reporter_id:
+        return "No reporter_id provided."
+
+    try:
+        resp = dynamodb.query(
+            TableName=config.REPORTS_TABLE,
+            IndexName="gsi_reporter",
+            KeyConditionExpression="reporter_id = :rid",
+            ExpressionAttributeValues={":rid": {"S": reporter_id}},
+            ProjectionExpression="report_id, validation_status, trust_score, ingested_at",
+            ScanIndexForward=False,
+            Limit=10,
+        )
+
+        items = resp.get("Items", [])
+        if not items:
+            return "First-time reporter — no previous reports found."
+
+        total = len(items)
+        status_counts: dict[str, int] = {}
+        scores: list[int] = []
+
+        for item in items:
+            status = item.get("validation_status", {}).get("S", "UNKNOWN")
+            status_counts[status] = status_counts.get(status, 0) + 1
+            score = item.get("trust_score", {}).get("N")
+            if score:
+                scores.append(int(score))
+
+        avg_score = sum(scores) // len(scores) if scores else 0
+        status_summary = ", ".join(f"{s}: {c}" for s, c in status_counts.items())
+
+        return (
+            f"Reporter has {total} prior report(s) (showing up to 10). "
+            f"Status breakdown: {status_summary}. "
+            f"Average trust score: {avg_score}/100."
+        )
+    except Exception as e:
+        logger.warning(f"Could not fetch reporter history: {e}")
+        return "Reporter history unavailable."

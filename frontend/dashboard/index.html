@@ -414,6 +414,15 @@
     <div class="sidebar-item" onclick="showPanel('stats')">
         <span class="sidebar-method GET">GET</span> /reports/stats
     </div>
+    <div class="sidebar-item" onclick="showPanel('audit')">
+        <span class="sidebar-method GET">GET</span> /reports/audit
+    </div>
+    <div class="sidebar-item" onclick="showPanel('events')">
+        <span class="sidebar-method GET">GET</span> /reports/events
+    </div>
+    <div class="sidebar-item" onclick="showPanel('upload')">
+        <span class="sidebar-method POST">POST</span> /reports/upload-url
+    </div>
 
     <div class="sidebar-section">Quick Actions</div>
     <div class="sidebar-item" onclick="showPanel('overview')">&#128202; Live Overview</div>
@@ -793,6 +802,124 @@
         </div>
     </div>
 
+    <!-- ==================== AUDIT LOGS PANEL ==================== -->
+    <div id="panel-audit" class="api-panel">
+        <div class="panel-header">
+            <div>
+                <h2>&#128220; Audit Logs</h2>
+                <p>View audit trail — safe read from audit_logs table</p>
+            </div>
+            <span class="method-badge GET">GET /reports/audit</span>
+        </div>
+
+        <div class="form-card">
+            <div class="form-group">
+                <label>Report ID (optional — leave blank for all)</label>
+                <input id="audit-report-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000">
+            </div>
+            <div class="form-group">
+                <label>Limit</label>
+                <input id="audit-limit" type="number" value="20" min="1" max="100">
+            </div>
+            <button class="btn" onclick="fetchAuditLogs()">Fetch Audit Logs</button>
+        </div>
+
+        <div id="audit-timeline" style="margin-top:1rem;"></div>
+
+        <div class="response-card" style="margin-top:1rem;">
+            <div class="response-header">
+                <div id="audit-status" class="response-status">Ready</div>
+                <div id="audit-time" class="response-time"></div>
+            </div>
+            <pre id="audit-response" class="response-body response-empty">No data yet</pre>
+        </div>
+    </div>
+
+    <!-- ==================== EVENTS PANEL ==================== -->
+    <div id="panel-events" class="api-panel">
+        <div class="panel-header">
+            <div>
+                <h2>&#9889; EventBridge Events</h2>
+                <p>View async contract events (ReportVerified, StatusChanged)</p>
+            </div>
+            <span class="method-badge GET">GET /reports/events</span>
+        </div>
+
+        <div class="form-card">
+            <div class="form-group">
+                <label>Event Type</label>
+                <select id="events-type">
+                    <option value="all">All Events</option>
+                    <option value="verified">ReportVerifiedEvent</option>
+                    <option value="status-changed">ReportStatusChangedEvent</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Limit</label>
+                <input id="events-limit" type="number" value="20" min="1" max="50">
+            </div>
+            <button class="btn" onclick="fetchEvents()">Fetch Events</button>
+        </div>
+
+        <div class="info-card" style="margin-top:1rem; background:var(--bg-tertiary); padding:1rem; border-radius:8px; border:1px solid var(--border);">
+            <h3 style="margin:0 0 .5rem">&#128218; How to Subscribe to Events</h3>
+            <p style="color:var(--text-secondary); font-size:.85rem; margin:0">
+                Other services can subscribe to these events via EventBridge rules on the custom bus.
+                See the <strong>Integration Guide</strong> (docs/integration-guide.md) for full details.
+            </p>
+        </div>
+
+        <div id="events-list" style="margin-top:1rem;"></div>
+
+        <div class="response-card" style="margin-top:1rem;">
+            <div class="response-header">
+                <div id="events-status" class="response-status">Ready</div>
+                <div id="events-time" class="response-time"></div>
+            </div>
+            <pre id="events-response" class="response-body response-empty">No data yet</pre>
+        </div>
+    </div>
+
+    <!-- ==================== MEDIA UPLOAD PANEL ==================== -->
+    <div id="panel-upload" class="api-panel">
+        <div class="panel-header">
+            <div>
+                <h2>&#128247; Media Upload</h2>
+                <p>Upload evidence files (images, video, PDF) via presigned S3 URL</p>
+            </div>
+            <span class="method-badge POST">POST /reports/upload-url</span>
+        </div>
+
+        <div class="form-card">
+            <div class="form-group">
+                <label>Report ID (optional — link to existing report)</label>
+                <input id="upload-report-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000">
+            </div>
+            <div class="form-group">
+                <label>Select File</label>
+                <input type="file" id="upload-file" accept="image/*,video/mp4,video/quicktime,application/pdf"
+                       onchange="previewUploadFile()" style="padding:0.5rem;">
+            </div>
+            <div id="upload-preview" style="margin-top:.5rem; display:none;"></div>
+            <button class="btn" onclick="uploadMedia()" id="upload-btn" disabled>Upload File</button>
+        </div>
+
+        <div id="upload-progress" style="margin-top:1rem; display:none;">
+            <div style="background:var(--bg-tertiary); border-radius:8px; overflow:hidden; height:6px;">
+                <div id="upload-bar" style="width:0%; height:100%; background:var(--primary); transition:width 0.3s;"></div>
+            </div>
+            <p id="upload-status-text" style="color:var(--text-secondary); font-size:.85rem; margin-top:.5rem;">Uploading…</p>
+        </div>
+
+        <div class="response-card" style="margin-top:1rem;">
+            <div class="response-header">
+                <div id="upload-status" class="response-status">Ready</div>
+                <div id="upload-time" class="response-time"></div>
+            </div>
+            <pre id="upload-response" class="response-body response-empty">No uploads yet</pre>
+        </div>
+    </div>
+
 </main>
 </div>
 
@@ -976,10 +1103,8 @@ async function sendList() {
 
     try {
         const r = await apiRequest('GET', `/reports?${params.toString()}`);
-        updateResponseUI('list-status', { status: r.status, data: r.data, elapsed: r.elapsed });
         document.getElementById('list-meta').textContent = `${r.elapsed}ms`;
 
-        // Fix: use correct IDs
         const statusEl = document.getElementById('list-status-resp');
         const codeClass = r.status < 300 ? 'status-2xx' : r.status < 500 ? 'status-4xx' : 'status-5xx';
         statusEl.innerHTML = `<span class="status-code ${codeClass}">${r.status}</span> Response`;
@@ -1057,7 +1182,6 @@ async function sendVerify() {
 
     try {
         const r = await apiRequest('PATCH', `/reports/${id}`, body);
-        updateResponseUI('verify-status', { status: r.status, data: r.data, elapsed: r.elapsed });
         document.getElementById('verify-meta').textContent = `${r.elapsed}ms`;
 
         const statusEl = document.getElementById('verify-status-resp');
@@ -1175,6 +1299,171 @@ function escapeHtml(str) {
     const d = document.createElement('div');
     d.textContent = str;
     return d.innerHTML;
+}
+
+// =========================================
+// Audit Logs
+// =========================================
+async function fetchAuditLogs() {
+    const reportId = document.getElementById('audit-report-id').value.trim();
+    const limit = document.getElementById('audit-limit').value || '20';
+
+    let path = `/reports/audit?limit=${limit}`;
+    if (reportId) path += `&report_id=${encodeURIComponent(reportId)}`;
+
+    const { status, data, elapsed } = await apiRequest('GET', path);
+    updateResponseUI('audit', status, elapsed);
+    document.getElementById('audit-response').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('audit-response').className = 'response-body';
+
+    // Render timeline
+    const container = document.getElementById('audit-timeline');
+    if (data && data.data && data.data.length > 0) {
+        container.innerHTML = data.data.map(log => `
+            <div style="border-left:3px solid var(--primary); padding:.5rem 1rem; margin-bottom:.5rem; background:var(--bg-tertiary); border-radius:0 8px 8px 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong style="color:var(--primary);">${escapeHtml(log.action_type || 'UNKNOWN')}</strong>
+                    <span style="color:var(--text-secondary); font-size:.8rem;">${log.timestamp || ''}</span>
+                </div>
+                <div style="color:var(--text-secondary); font-size:.85rem; margin-top:.25rem;">
+                    Report: <code>${escapeHtml(log.report_ref_id || '')}</code>
+                    &bull; Actor: <code>${escapeHtml(log.actor_id || 'system')}</code>
+                </div>
+            </div>
+        `).join('');
+    } else {
+        container.innerHTML = '<p style="color:var(--text-secondary);">No audit logs found</p>';
+    }
+}
+
+// =========================================
+// Events (EventBridge)
+// =========================================
+async function fetchEvents() {
+    const type = document.getElementById('events-type').value;
+    const limit = document.getElementById('events-limit').value || '20';
+
+    const path = `/reports/events?type=${type}&limit=${limit}`;
+    const { status, data, elapsed } = await apiRequest('GET', path);
+    updateResponseUI('events', status, elapsed);
+    document.getElementById('events-response').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('events-response').className = 'response-body';
+
+    const container = document.getElementById('events-list');
+    if (data && data.data && data.data.length > 0) {
+        container.innerHTML = data.data.map(ev => {
+            const ts = ev.timestamp ? new Date(ev.timestamp).toLocaleString() : 'N/A';
+            const typeLabel = ev.event_type || 'Unknown';
+            const color = typeLabel.includes('Verified') ? 'var(--success)' :
+                          typeLabel.includes('Status') ? 'var(--warning)' : 'var(--text-secondary)';
+            return `
+            <div style="border-left:3px solid ${color}; padding:.5rem 1rem; margin-bottom:.5rem; background:var(--bg-tertiary); border-radius:0 8px 8px 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong style="color:${color};">${escapeHtml(typeLabel)}</strong>
+                    <span style="color:var(--text-secondary); font-size:.8rem;">${ts}</span>
+                </div>
+                ${ev.detail ? `<pre style="font-size:.8rem; margin:.25rem 0 0; color:var(--text-secondary); overflow:auto; max-height:100px;">${escapeHtml(JSON.stringify(ev.detail, null, 2))}</pre>` : ''}
+            </div>`;
+        }).join('');
+    } else {
+        container.innerHTML = '<p style="color:var(--text-secondary);">No events found. Events appear here after PATCH verify/reject operations trigger EventBridge.</p>';
+    }
+}
+
+// =========================================
+// Media Upload
+// =========================================
+function previewUploadFile() {
+    const input = document.getElementById('upload-file');
+    const preview = document.getElementById('upload-preview');
+    const btn = document.getElementById('upload-btn');
+
+    if (!input.files.length) {
+        preview.style.display = 'none';
+        btn.disabled = true;
+        return;
+    }
+
+    const file = input.files[0];
+    const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+    preview.style.display = 'block';
+    preview.innerHTML = `
+        <div style="padding:.5rem; background:var(--bg-tertiary); border-radius:8px; font-size:.85rem;">
+            <strong>${escapeHtml(file.name)}</strong> &bull; ${sizeMB} MB &bull; ${file.type}
+        </div>`;
+    btn.disabled = false;
+}
+
+async function uploadMedia() {
+    const input = document.getElementById('upload-file');
+    if (!input.files.length) return showToast('Select a file first', 'error');
+
+    const file = input.files[0];
+    const reportId = document.getElementById('upload-report-id').value.trim();
+
+    // Step 1: Get presigned URL
+    document.getElementById('upload-progress').style.display = 'block';
+    document.getElementById('upload-bar').style.width = '30%';
+    document.getElementById('upload-status-text').textContent = 'Getting presigned URL…';
+
+    const { status, data, elapsed } = await apiRequest('POST', '/reports/upload-url', {
+        filename: file.name,
+        content_type: file.type || 'application/octet-stream',
+        report_id: reportId || undefined
+    });
+
+    updateResponseUI('upload', status, elapsed);
+
+    if (status !== 200 || !data || !data.upload_url) {
+        document.getElementById('upload-bar').style.width = '100%';
+        document.getElementById('upload-bar').style.background = 'var(--danger)';
+        document.getElementById('upload-status-text').textContent = 'Failed to get upload URL';
+        document.getElementById('upload-response').textContent = JSON.stringify(data, null, 2);
+        document.getElementById('upload-response').className = 'response-body';
+        return;
+    }
+
+    // Step 2: Upload file to S3
+    document.getElementById('upload-bar').style.width = '60%';
+    document.getElementById('upload-status-text').textContent = 'Uploading to S3…';
+
+    try {
+        const uploadResp = await fetch(data.upload_url, {
+            method: 'PUT',
+            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+            body: file
+        });
+
+        document.getElementById('upload-bar').style.width = '100%';
+        if (uploadResp.ok) {
+            document.getElementById('upload-bar').style.background = 'var(--success)';
+            document.getElementById('upload-status-text').textContent = '✓ Upload complete!';
+            showToast('File uploaded successfully!', 'success');
+
+            const result = {
+                ...data,
+                upload_status: 'SUCCESS',
+                file_name: file.name,
+                file_size: file.size,
+                note: 'Include media_url in your POST /reports payload under media_urls[]'
+            };
+            document.getElementById('upload-response').textContent = JSON.stringify(result, null, 2);
+        } else {
+            document.getElementById('upload-bar').style.background = 'var(--danger)';
+            document.getElementById('upload-status-text').textContent = `Upload failed: HTTP ${uploadResp.status}`;
+            document.getElementById('upload-response').textContent = JSON.stringify({
+                error: `S3 upload failed with status ${uploadResp.status}`,
+                presigned_data: data
+            }, null, 2);
+        }
+        document.getElementById('upload-response').className = 'response-body';
+    } catch(e) {
+        document.getElementById('upload-bar').style.width = '100%';
+        document.getElementById('upload-bar').style.background = 'var(--danger)';
+        document.getElementById('upload-status-text').textContent = 'Upload error: ' + e.message;
+        document.getElementById('upload-response').textContent = JSON.stringify({ error: e.message, presigned_data: data }, null, 2);
+        document.getElementById('upload-response').className = 'response-body';
+    }
 }
 </script>
 

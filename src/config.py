@@ -24,6 +24,9 @@ class Config:
     EVENT_BUS_NAME: str = os.environ.get("EVENT_BUS_NAME", "disaster-event-bus")
     EVENT_SOURCE: str = "service.report-verify"
 
+    # S3 Media
+    MEDIA_BUCKET: str = os.environ.get("MEDIA_BUCKET", "")
+
     # Gemini AI — multi-key rotation + model fallback
     GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")  # legacy single key
     GEMINI_API_KEYS: list = []  # populated in __init_keys()
@@ -33,13 +36,29 @@ class Config:
 
     @staticmethod
     def __init_keys() -> list:
-        """Load all GEMINI_API_KEY* from env. Supports KEY1..KEY10."""
-        keys = []
-        for i in range(1, 11):
-            k = os.environ.get(f"GEMINI_API_KEY{i}", "")
-            if k:
-                keys.append(k)
-        # Fallback: single GEMINI_API_KEY
+        """Load Gemini API keys from environment.
+
+        Supports (in priority order):
+          1. GEMINI_API_KEYS — comma-separated string (used by Lambda env)
+          2. GEMINI_API_KEY1..GEMINI_API_KEY9999 — individual vars (used by local .env)
+          3. GEMINI_API_KEY — single key fallback (legacy)
+        """
+        import re
+
+        # Method 1: Comma-separated (from Terraform → Lambda env)
+        csv_keys = os.environ.get("GEMINI_API_KEYS", "")
+        if csv_keys:
+            return [k.strip() for k in csv_keys.split(",") if k.strip()]
+
+        # Method 2: Individual numbered keys (GEMINI_API_KEY1..GEMINI_API_KEY9999)
+        key_vars = sorted(
+            [(name, val) for name, val in os.environ.items()
+             if re.match(r'^GEMINI_API_KEY\d+$', name) and val],
+            key=lambda x: int(re.search(r'\d+', x[0]).group()),
+        )
+        keys = [val for _, val in key_vars]
+
+        # Method 3: Single key fallback
         if not keys:
             single = os.environ.get("GEMINI_API_KEY", "")
             if single:

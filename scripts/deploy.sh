@@ -121,16 +121,24 @@ terraform init -input=false
 # ----------------------------------------------------------
 echo "[5/5] Applying Terraform..."
 
-# Build -var flags for Gemini API keys
-TF_VARS=""
-for i in $(seq 1 10); do
-    VAR_NAME="GEMINI_API_KEY${i}"
-    VAR_VALUE="${!VAR_NAME:-}"
-    if [[ -n "$VAR_VALUE" ]]; then
-        TF_VARS="$TF_VARS -var=gemini_api_key${i}=${VAR_VALUE}"
-        echo "  -> Found $VAR_NAME"
+# Collect ALL GEMINI_API_KEY{N} from environment (N = 1..9999)
+# Joins them into a comma-separated string for Terraform
+GEMINI_KEYS_CSV=""
+KEY_COUNT=0
+for var_name in $(printenv | grep -oP '^GEMINI_API_KEY\d+' | sort -V); do
+    val="${!var_name}"
+    if [[ -n "$val" ]]; then
+        ((KEY_COUNT++))
+        GEMINI_KEYS_CSV="${GEMINI_KEYS_CSV:+${GEMINI_KEYS_CSV},}${val}"
+        echo "  -> Found $var_name"
     fi
 done
+echo "  -> Total Gemini API keys: $KEY_COUNT"
+
+TF_VARS=""
+if [[ -n "$GEMINI_KEYS_CSV" ]]; then
+    TF_VARS="$TF_VARS -var=gemini_api_keys=${GEMINI_KEYS_CSV}"
+fi
 
 # Gemini model fallbacks
 if [[ -n "${GEMINI_MODEL_FALLBACKS:-}" ]]; then

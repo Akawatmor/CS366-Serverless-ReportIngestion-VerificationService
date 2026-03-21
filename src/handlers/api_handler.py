@@ -71,6 +71,19 @@ def handler(event: dict, context) -> dict:
         elif method == "GET" and "/stats" in path:
             result = _handle_get_stats(query_params, dynamodb)
 
+        elif method == "GET" and "/audit" in path:
+            result = _handle_get_audit_logs(query_params, dynamodb)
+
+        elif method == "GET" and "/events" in path:
+            result = _handle_get_events(query_params, dynamodb)
+
+        elif method == "POST" and "/upload-url" in path:
+            body = _parse_body(event)
+            if isinstance(body, dict) and "error" in body:
+                result = body
+            else:
+                result = _handle_upload_url(body)
+
         elif method == "GET" and path_params.get("report_id"):
             result = _handle_get_detail(path_params["report_id"], dynamodb)
 
@@ -437,13 +450,280 @@ def _handle_get_stats(query_params: dict, dynamodb) -> dict:
                 "verified_incidents": stats_map.get("verified_incidents", 0),
                 "spam_rejected": stats_map.get("spam_rejected", 0),
             },
-            "trending_keywords": [],  # TODO: implement keyword tracking
+            "trending_keywords": _compute_trending_keywords(dynamodb),
             "heatmap_data": [],       # TODO: implement from geo_location aggregation
         })
 
     except Exception as e:
         logger.error(f"Error getting stats: {e}", exc_info=True)
         return response.internal_error("Failed to compute statistics.")
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/audit — Audit logs (safe table read)
+# ---------------------------------------------------------------------------
+
+def _handle_get_audit_logs(query_params: dict, dynamodb) -> dict:
+    """Retrieve audit logs, optionally filtered by report_id."""
+    report_id = query_params.get("report_id")
+    limit = min(int(query_params.get("limit", "20")), 100)
+
+    try:
+        if report_id:
+            # Query by report using GSI
+            resp = dynamodb.query(
+                TableName=config.AUDIT_TABLE,
+                IndexName="gsi_report_timestamp",
+                KeyConditionExpression="report_ref_id = :rid",
+                ExpressionAttributeValues={":rid": {"S": report_id}},
+                ScanIndexForward=False,
+                Limit=limit,
+            )
+        else:
+            # Scan recent audit logs (limited)
+            resp = dynamodb.scan(
+                TableName=config.AUDIT_TABLE,
+                Limit=limit,
+            )
+
+        items = resp.get("Items", [])
+        logs = []
+        for item in items:
+            log_entry = {
+                "log_id": item.get("log_id", {}).get("S", ""),
+                "report_ref_id": item.get("report_ref_id", {}).get("S", ""),
+                "actor_id": item.get("actor_id", {}).get("S", ""),
+                "action_type": item.get("action_type", {}).get("S", ""),
+                "timestamp": item.get("timestamp", {}).get("S", ""),
+            }
+            if "new_value" in item:
+                try:
+                    log_entry["new_value"] = json.loads(item["new_value"]["S"])
+                except Exception:
+                    log_entry["new_value"] = item["new_value"]["S"]
+            if "previous_value" in item:
+                try:
+                    log_entry["previous_value"] = json.loads(item["previous_value"]["S"])
+                except Exception:
+                    log_entry["previous_value"] = item["previous_value"]["S"]
+            logs.append(log_entry)
+
+        return response.success({
+            "data": logs,
+            "total_count": len(logs),
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching audit logs: {e}", exc_info=True)
+        return response.internal_error("Failed to retrieve audit logs.")
+
+
+# ---------------------------------------------------------------------------
+# GET /reports/events — Recent EventBridge events (from CloudWatch Logs)
+# ---------------------------------------------------------------------------
+
+def _handle_get_events(query_params: dict, dynamodb) -> dict:
+    """Retrieve recent EventBridge events from CloudWatch Logs."""
+    limit = min(int(query_params.get("limit", "20")), 50)
+    event_type = query_params.get("type", "all")  # all, verified, status-changed
+
+    try:
+        logs_client = boto3.client("logs", region_name=config.AWS_REGION)
+        events = []
+
+        # Determine which log groups to query
+        prefix = config.EVENT_BUS_NAME.rsplit("-disaster-event-bus", 1)[0]
+        log_groups = []
+        if event_type in ("all", "verified"):
+            log_groups.append(f"/events/{prefix}/report-verified")
+        if event_type in ("all", "status-changed"):
+            log_groups.append(f"/events/{prefix}/status-changed")
+
+        for log_group in log_groups:
+            try:
+                resp = logs_client.filter_log_events(
+                    logGroupName=log_group,
+                    limit=limit,
+                    interleaved=True,
+                )
+                for ev in resp.get("events", []):
+                    try:
+                        msg = json.loads(ev.get("message", "{}"))
+                        events.append({
+                            "event_type": msg.get("detail-type", "Unknown"),
+                            "source": msg.get("source", ""),
+                            "timestamp": ev.get("timestamp"),
+                            "detail": msg.get("detail", {}),
+                        })
+                    except (json.JSONDecodeError, TypeError):
+                        events.append({
+                            "event_type": "raw",
+                            "message": ev.get("message", "")[:500],
+                            "timestamp": ev.get("timestamp"),
+                        })
+            except Exception as e:
+                logger.warning(f"Could not read log group {log_group}: {e}")
+
+        # Sort by timestamp descending
+        events.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+        events = events[:limit]
+
+        return response.success({
+            "data": events,
+            "total_count": len(events),
+            "log_groups": log_groups,
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching events: {e}", exc_info=True)
+        return response.internal_error("Failed to retrieve events.")
+
+
+# ---------------------------------------------------------------------------
+# POST /reports/upload-url — Generate presigned S3 URL for media upload
+# ---------------------------------------------------------------------------
+
+def _handle_upload_url(body: dict) -> dict:
+    """Generate a presigned S3 PUT URL for uploading media evidence."""
+    filename = body.get("filename", "")
+    content_type = body.get("content_type", "application/octet-stream")
+    report_id = body.get("report_id", "")
+
+    if not filename:
+        return response.bad_request("filename is required.")
+
+    if not config.MEDIA_BUCKET:
+        return response.internal_error("Media storage not configured.")
+
+    # Validate content type
+    allowed_types = [
+        "image/jpeg", "image/png", "image/gif", "image/webp",
+        "video/mp4", "video/quicktime", "video/x-msvideo",
+        "application/pdf",
+    ]
+    if content_type not in allowed_types:
+        return response.bad_request(
+            f"Unsupported content_type. Allowed: {allowed_types}"
+        )
+
+    # Build S3 key: media/{report_id_or_temp}/{uuid}_{filename}
+    prefix = report_id if report_id else "temp"
+    safe_filename = filename.replace(" ", "_").replace("/", "_")
+    s3_key = f"media/{prefix}/{uuid.uuid4().hex[:8]}_{safe_filename}"
+
+    try:
+        s3_client = boto3.client("s3", region_name=config.AWS_REGION)
+
+        # Generate presigned PUT URL (expires in 15 minutes)
+        presigned_url = s3_client.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": config.MEDIA_BUCKET,
+                "Key": s3_key,
+                "ContentType": content_type,
+            },
+            ExpiresIn=900,  # 15 minutes
+        )
+
+        # The final URL for referencing this media
+        media_url = f"https://{config.MEDIA_BUCKET}.s3.{config.AWS_REGION}.amazonaws.com/{s3_key}"
+
+        return response.success({
+            "upload_url": presigned_url,
+            "media_url": media_url,
+            "s3_key": s3_key,
+            "expires_in": 900,
+            "method": "PUT",
+            "content_type": content_type,
+            "instructions": (
+                "1. PUT the file body to upload_url with Content-Type header. "
+                "2. Include media_url in POST /reports media_urls array."
+            ),
+        })
+
+    except Exception as e:
+        logger.error(f"Error generating presigned URL: {e}", exc_info=True)
+        return response.internal_error("Failed to generate upload URL.")
+
+
+# ---------------------------------------------------------------------------
+# Trending Keywords computation
+# ---------------------------------------------------------------------------
+
+def _compute_trending_keywords(dynamodb) -> list[dict]:
+    """Compute trending keywords from recent reports' AI analysis tags."""
+    try:
+        # Query recent PENDING_REVIEW + VERIFIED reports for their tags
+        resp = dynamodb.query(
+            TableName=config.REPORTS_TABLE,
+            IndexName="gsi_status_ingested",
+            KeyConditionExpression="validation_status = :status",
+            ExpressionAttributeValues={":status": {"S": "PENDING_REVIEW"}},
+            ProjectionExpression="ai_analysis_tags, suggested_category",
+            ScanIndexForward=False,
+            Limit=50,
+        )
+
+        # Count keyword frequency
+        keyword_counts: dict[str, int] = {}
+        category_counts: dict[str, int] = {}
+
+        for item in resp.get("Items", []):
+            tags = [t["S"] for t in item.get("ai_analysis_tags", {}).get("L", [])]
+            for tag in tags:
+                tag_lower = tag.lower().strip()
+                if tag_lower and len(tag_lower) > 1:
+                    keyword_counts[tag_lower] = keyword_counts.get(tag_lower, 0) + 1
+
+            cat = item.get("suggested_category", {}).get("S", "")
+            if cat:
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+
+        # Also check VERIFIED reports
+        resp2 = dynamodb.query(
+            TableName=config.REPORTS_TABLE,
+            IndexName="gsi_status_ingested",
+            KeyConditionExpression="validation_status = :status",
+            ExpressionAttributeValues={":status": {"S": "VERIFIED"}},
+            ProjectionExpression="ai_analysis_tags, suggested_category",
+            ScanIndexForward=False,
+            Limit=50,
+        )
+
+        for item in resp2.get("Items", []):
+            tags = [t["S"] for t in item.get("ai_analysis_tags", {}).get("L", [])]
+            for tag in tags:
+                tag_lower = tag.lower().strip()
+                if tag_lower and len(tag_lower) > 1:
+                    keyword_counts[tag_lower] = keyword_counts.get(tag_lower, 0) + 1
+
+            cat = item.get("suggested_category", {}).get("S", "")
+            if cat:
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+
+        # Sort by frequency, top 10
+        trending = sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+
+        return [
+            {"keyword": kw, "count": count, "category": _guess_category(kw, category_counts)}
+            for kw, count in trending
+        ]
+
+    except Exception as e:
+        logger.warning(f"Could not compute trending keywords: {e}")
+        return []
+
+
+def _guess_category(keyword: str, category_counts: dict) -> str:
+    """Guess the disaster category for a keyword based on common patterns."""
+    kw = keyword.lower()
+    category_map = {
+        "fire": "FIRE", "smoke": "FIRE", "ไฟ": "FIRE", "ไฟไหม้": "FIRE",
+        "flood": "FLOOD", "water": "FLOOD", "น้ำท่วม": "FLOOD", "น้ำ": "FLOOD",
+        "earthquake": "EARTHQUAKE", "quake": "EARTHQUAKE", "แผ่นดินไหว": "EARTHQUAKE",
+        "accident": "ACCIDENT", "crash": "ACCIDENT", "อุบัติเหตุ": "ACCIDENT",
+    }
+    return category_map.get(kw, max(category_counts, key=category_counts.get) if category_counts else "OTHER")
 
 
 # ---------------------------------------------------------------------------
