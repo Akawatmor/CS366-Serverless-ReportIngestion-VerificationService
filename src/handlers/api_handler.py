@@ -64,52 +64,52 @@ def handler(event: dict, context) -> dict:
         if method == "GET" and path in ("/reports", "/v1/reports"):
             # Check if it's /reports/stats
             if query_params.get("_route") == "stats":
-                result = _handle_get_stats(query_params, dynamodb)
+                result = _handle_get_stats(query_params, dynamodb, request_id)
             else:
-                result = _handle_list_reports(query_params, dynamodb)
+                result = _handle_list_reports(query_params, dynamodb, request_id)
 
         elif method == "GET" and "/stats" in path:
-            result = _handle_get_stats(query_params, dynamodb)
+            result = _handle_get_stats(query_params, dynamodb, request_id)
 
         elif method == "GET" and "/audit" in path:
-            result = _handle_get_audit_logs(query_params, dynamodb)
+            result = _handle_get_audit_logs(query_params, dynamodb, request_id)
 
         elif method == "GET" and "/events" in path:
-            result = _handle_get_events(query_params, dynamodb)
+            result = _handle_get_events(query_params, dynamodb, request_id)
 
         elif method == "POST" and "/upload-url" in path:
-            body = _parse_body(event)
+            body = _parse_body(event, request_id)
             if isinstance(body, dict) and "error" in body:
                 result = body
             else:
-                result = _handle_upload_url(body)
+                result = _handle_upload_url(body, request_id)
 
         elif method == "GET" and path_params.get("report_id"):
-            result = _handle_get_detail(path_params["report_id"], dynamodb)
+            result = _handle_get_detail(path_params["report_id"], dynamodb, request_id)
 
         elif method == "PATCH" and path_params.get("report_id"):
-            body = _parse_body(event)
+            body = _parse_body(event, request_id)
             if isinstance(body, dict) and "error" in body:
                 result = body  # Return parse error
             else:
-                result = _handle_verify(path_params["report_id"], body, dynamodb)
+                result = _handle_verify(path_params["report_id"], body, dynamodb, request_id)
 
         elif method == "DELETE" and path_params.get("report_id"):
-            body = _parse_body(event)
+            body = _parse_body(event, request_id)
             if isinstance(body, dict) and "error" in body:
                 result = body
             else:
-                result = _handle_delete(path_params["report_id"], body, dynamodb)
+                result = _handle_delete(path_params["report_id"], body, dynamodb, request_id)
 
         elif method == "OPTIONS":
-            result = response.success({"message": "CORS preflight OK"})
+            result = response.success({"message": "CORS preflight OK"}, trace_id=request_id)
 
         else:
-            result = response.not_found(f"No route for {method} {path}")
+            result = response.not_found(f"No route for {method} {path}", trace_id=request_id)
 
     except Exception as e:
         logger.error("Unhandled error in API handler", exc_info=True)
-        result = response.internal_error(str(e))
+        result = response.internal_error(str(e), trace_id=request_id)
 
     duration_ms = int((time.time() - start) * 1000)
     logger.info("API response", extra={
@@ -126,11 +126,11 @@ def handler(event: dict, context) -> dict:
 # GET /reports — List pending reports (API Contract #2)
 # ---------------------------------------------------------------------------
 
-def _handle_list_reports(query_params: dict, dynamodb) -> dict:
+def _handle_list_reports(query_params: dict, dynamodb, trace_id: str | None = None) -> dict:
     """Query reports by status with optional trust score filter."""
     parsed, errors = validate_list_params(query_params)
     if errors:
-        return response.bad_request("Invalid query parameters.", "; ".join(errors))
+        return response.bad_request("Invalid query parameters.", "; ".join(errors), trace_id=trace_id)
 
     status = parsed.get("status", ValidationStatus.PENDING_REVIEW.value)
     limit = parsed.get("limit", config.DEFAULT_PAGE_LIMIT)
@@ -165,18 +165,18 @@ def _handle_list_reports(query_params: dict, dynamodb) -> dict:
         return response.success({
             "data": reports,
             "total_count": resp.get("Count", 0),
-        })
+        }, trace_id=trace_id)
 
     except Exception as e:
         logger.error(f"Error listing reports: {e}", exc_info=True)
-        return response.internal_error("Failed to retrieve reports.")
+        return response.internal_error("Failed to retrieve reports.", trace_id=trace_id)
 
 
 # ---------------------------------------------------------------------------
 # GET /reports/{report_id} — Report detail (API Contract #4)
 # ---------------------------------------------------------------------------
 
-def _handle_get_detail(report_id: str, dynamodb) -> dict:
+def _handle_get_detail(report_id: str, dynamodb, trace_id: str | None = None) -> dict:
     """Get full report detail by ID."""
     try:
         resp = dynamodb.get_item(
@@ -186,30 +186,30 @@ def _handle_get_detail(report_id: str, dynamodb) -> dict:
 
         item = resp.get("Item")
         if not item:
-            return response.not_found(f"Report '{report_id}' not found.")
+            return response.not_found(f"Report '{report_id}' not found.", trace_id=trace_id)
 
         report = Report.from_dynamodb_item(item)
 
         # Don't show DELETED reports
         if report.validation_status == ValidationStatus.DELETED.value:
-            return response.not_found(f"Report '{report_id}' not found.")
+            return response.not_found(f"Report '{report_id}' not found.", trace_id=trace_id)
 
-        return response.success(report.to_api_detail())
+        return response.success(report.to_api_detail(), trace_id=trace_id)
 
     except Exception as e:
         logger.error(f"Error getting report detail: {e}", exc_info=True)
-        return response.internal_error("Failed to retrieve report.")
+        return response.internal_error("Failed to retrieve report.", trace_id=trace_id)
 
 
 # ---------------------------------------------------------------------------
 # PATCH /reports/{report_id} — Verify/Reject (API Contract #3)
 # ---------------------------------------------------------------------------
 
-def _handle_verify(report_id: str, body: dict, dynamodb) -> dict:
+def _handle_verify(report_id: str, body: dict, dynamodb, trace_id: str | None = None) -> dict:
     """Process verification decision from Trust Officer."""
     errors = validate_verify_payload(body)
     if errors:
-        return response.bad_request("Validation failed.", "; ".join(errors))
+        return response.bad_request("Validation failed.", "; ".join(errors), trace_id=trace_id)
 
     new_status = body["validation_status"]
 
@@ -221,17 +221,17 @@ def _handle_verify(report_id: str, body: dict, dynamodb) -> dict:
         )
         item = resp.get("Item")
         if not item:
-            return response.not_found(f"Report '{report_id}' not found.")
+            return response.not_found(f"Report '{report_id}' not found.", trace_id=trace_id)
 
         current_status = item["validation_status"]["S"]
     except Exception as e:
         logger.error(f"Error fetching report for verify: {e}", exc_info=True)
-        return response.internal_error("Failed to retrieve report.")
+        return response.internal_error("Failed to retrieve report.", trace_id=trace_id)
 
     # Validate transition
     transition_error = validate_status_transition(current_status, new_status)
     if transition_error:
-        return response.conflict(transition_error)
+        return response.conflict(transition_error, trace_id=trace_id)
 
     # Determine action
     link_incident_id = body.get("link_to_incident_id")
@@ -273,11 +273,12 @@ def _handle_verify(report_id: str, body: dict, dynamodb) -> dict:
         )
     except dynamodb.exceptions.ConditionalCheckFailedException:
         return response.conflict(
-            "Report has been modified by another user. Please refresh and try again."
+            "Report has been modified by another user. Please refresh and try again.",
+            trace_id=trace_id,
         )
     except Exception as e:
         logger.error(f"Error updating report status: {e}", exc_info=True)
-        return response.internal_error("Failed to update report.")
+        return response.internal_error("Failed to update report.", trace_id=trace_id)
 
     # --- Post-update async actions ---
     audit_svc = AuditService(dynamodb_client=dynamodb)
@@ -333,18 +334,18 @@ def _handle_verify(report_id: str, body: dict, dynamodb) -> dict:
         "validation_status": new_status,
         "action_taken": action_taken,
         "updated_at": now,
-    })
+    }, trace_id=trace_id)
 
 
 # ---------------------------------------------------------------------------
 # DELETE /reports/{report_id} — Soft delete (API Contract #6)
 # ---------------------------------------------------------------------------
 
-def _handle_delete(report_id: str, body: dict, dynamodb) -> dict:
+def _handle_delete(report_id: str, body: dict, dynamodb, trace_id: str | None = None) -> dict:
     """Soft-delete (archive) a report."""
     errors = validate_delete_payload(body)
     if errors:
-        return response.bad_request("Validation failed.", "; ".join(errors))
+        return response.bad_request("Validation failed.", "; ".join(errors), trace_id=trace_id)
 
     # Check report exists
     try:
@@ -355,14 +356,14 @@ def _handle_delete(report_id: str, body: dict, dynamodb) -> dict:
         )
         item = resp.get("Item")
         if not item:
-            return response.not_found(f"Report '{report_id}' not found.")
+            return response.not_found(f"Report '{report_id}' not found.", trace_id=trace_id)
 
         if item["validation_status"]["S"] == ValidationStatus.DELETED.value:
-            return response.not_found(f"Report '{report_id}' not found.")
+            return response.not_found(f"Report '{report_id}' not found.", trace_id=trace_id)
 
     except Exception as e:
         logger.error(f"Error checking report for delete: {e}", exc_info=True)
-        return response.internal_error("Failed to check report.")
+        return response.internal_error("Failed to check report.", trace_id=trace_id)
 
     # Soft delete — set status to DELETED
     now = datetime.now(timezone.utc).isoformat()
@@ -385,7 +386,7 @@ def _handle_delete(report_id: str, body: dict, dynamodb) -> dict:
         )
     except Exception as e:
         logger.error(f"Error soft-deleting report: {e}", exc_info=True)
-        return response.internal_error("Failed to delete report.")
+        return response.internal_error("Failed to delete report.", trace_id=trace_id)
 
     # Audit log
     audit_svc = AuditService(dynamodb_client=dynamodb)
@@ -399,18 +400,18 @@ def _handle_delete(report_id: str, body: dict, dynamodb) -> dict:
         "report_id": report_id,
         "status": "DELETED",
         "message": "Report has been archived and removed from public view.",
-    })
+    }, trace_id=trace_id)
 
 
 # ---------------------------------------------------------------------------
 # GET /reports/stats — Dashboard stats (API Contract #5)
 # ---------------------------------------------------------------------------
 
-def _handle_get_stats(query_params: dict, dynamodb) -> dict:
+def _handle_get_stats(query_params: dict, dynamodb, trace_id: str | None = None) -> dict:
     """Get aggregated dashboard statistics from the StatsCounter table."""
     parsed, errors = validate_stats_params(query_params)
     if errors:
-        return response.bad_request("Invalid parameters.", "; ".join(errors))
+        return response.bad_request("Invalid parameters.", "; ".join(errors), trace_id=trace_id)
 
     timeframe = parsed.get("timeframe", "today")
 
@@ -452,18 +453,18 @@ def _handle_get_stats(query_params: dict, dynamodb) -> dict:
             },
             "trending_keywords": _compute_trending_keywords(dynamodb),
             "heatmap_data": [],       # TODO: implement from geo_location aggregation
-        })
+        }, trace_id=trace_id)
 
     except Exception as e:
         logger.error(f"Error getting stats: {e}", exc_info=True)
-        return response.internal_error("Failed to compute statistics.")
+        return response.internal_error("Failed to compute statistics.", trace_id=trace_id)
 
 
 # ---------------------------------------------------------------------------
 # GET /reports/audit — Audit logs (safe table read)
 # ---------------------------------------------------------------------------
 
-def _handle_get_audit_logs(query_params: dict, dynamodb) -> dict:
+def _handle_get_audit_logs(query_params: dict, dynamodb, trace_id: str | None = None) -> dict:
     """Retrieve audit logs, optionally filtered by report_id."""
     report_id = query_params.get("report_id")
     limit = min(int(query_params.get("limit", "20")), 100)
@@ -511,18 +512,18 @@ def _handle_get_audit_logs(query_params: dict, dynamodb) -> dict:
         return response.success({
             "data": logs,
             "total_count": len(logs),
-        })
+        }, trace_id=trace_id)
 
     except Exception as e:
         logger.error(f"Error fetching audit logs: {e}", exc_info=True)
-        return response.internal_error("Failed to retrieve audit logs.")
+        return response.internal_error("Failed to retrieve audit logs.", trace_id=trace_id)
 
 
 # ---------------------------------------------------------------------------
 # GET /reports/events — Recent EventBridge events (from CloudWatch Logs)
 # ---------------------------------------------------------------------------
 
-def _handle_get_events(query_params: dict, dynamodb) -> dict:
+def _handle_get_events(query_params: dict, dynamodb, trace_id: str | None = None) -> dict:
     """Retrieve recent EventBridge events from CloudWatch Logs."""
     limit = min(int(query_params.get("limit", "20")), 50)
     event_type = query_params.get("type", "all")  # all, verified, status-changed
@@ -572,28 +573,28 @@ def _handle_get_events(query_params: dict, dynamodb) -> dict:
             "data": events,
             "total_count": len(events),
             "log_groups": log_groups,
-        })
+        }, trace_id=trace_id)
 
     except Exception as e:
         logger.error(f"Error fetching events: {e}", exc_info=True)
-        return response.internal_error("Failed to retrieve events.")
+        return response.internal_error("Failed to retrieve events.", trace_id=trace_id)
 
 
 # ---------------------------------------------------------------------------
 # POST /reports/upload-url — Generate presigned S3 URL for media upload
 # ---------------------------------------------------------------------------
 
-def _handle_upload_url(body: dict) -> dict:
+def _handle_upload_url(body: dict, trace_id: str | None = None) -> dict:
     """Generate a presigned S3 PUT URL for uploading media evidence."""
     filename = body.get("filename", "")
     content_type = body.get("content_type", "application/octet-stream")
     report_id = body.get("report_id", "")
 
     if not filename:
-        return response.bad_request("filename is required.")
+        return response.bad_request("filename is required.", trace_id=trace_id)
 
     if not config.MEDIA_BUCKET:
-        return response.internal_error("Media storage not configured.")
+        return response.internal_error("Media storage not configured.", trace_id=trace_id)
 
     # Validate content type
     allowed_types = [
@@ -603,7 +604,8 @@ def _handle_upload_url(body: dict) -> dict:
     ]
     if content_type not in allowed_types:
         return response.bad_request(
-            f"Unsupported content_type. Allowed: {allowed_types}"
+            f"Unsupported content_type. Allowed: {allowed_types}",
+            trace_id=trace_id,
         )
 
     # Build S3 key: media/{report_id_or_temp}/{uuid}_{filename}
@@ -639,11 +641,11 @@ def _handle_upload_url(body: dict) -> dict:
                 "1. PUT the file body to upload_url with Content-Type header. "
                 "2. Include media_url in POST /reports media_urls array."
             ),
-        })
+        }, trace_id=trace_id)
 
     except Exception as e:
         logger.error(f"Error generating presigned URL: {e}", exc_info=True)
-        return response.internal_error("Failed to generate upload URL.")
+        return response.internal_error("Failed to generate upload URL.", trace_id=trace_id)
 
 
 # ---------------------------------------------------------------------------
@@ -730,12 +732,12 @@ def _guess_category(keyword: str, category_counts: dict) -> str:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _parse_body(event: dict) -> dict:
+def _parse_body(event: dict, trace_id: str | None = None) -> dict:
     """Parse JSON body from API Gateway event."""
     try:
         return json.loads(event.get("body", "{}") or "{}")
     except (json.JSONDecodeError, TypeError):
-        return response.bad_request("Invalid JSON body.")
+        return response.bad_request("Invalid JSON body.", trace_id=trace_id)
 
 
 def _update_stat(dynamodb, stat_key: str, increment: int) -> None:

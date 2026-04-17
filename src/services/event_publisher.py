@@ -50,6 +50,7 @@ class EventPublisher:
         event_id = f"evt-{uuid.uuid4().hex[:16]}"
 
         detail = {
+            "schemaVersion": "1.0",
             "report_ref_id": report_id,
             "suggested_incident_data": suggested_incident_data,
             "verified_by": verified_by,
@@ -83,6 +84,7 @@ class EventPublisher:
         event_id = f"evt-{uuid.uuid4().hex[:16]}"
 
         detail = {
+            "schemaVersion": "1.0",
             "report_id": report_id,
             "old_status": old_status,
             "new_status": new_status,

@@ -30,6 +30,9 @@ def handler(event: dict, context) -> dict:
     Health check endpoint — no authentication required.
     Returns component-level health status.
     """
+    import uuid
+    request_id = context.aws_request_id if context else str(uuid.uuid4())
+    
     start = time.time()
     components: dict[str, dict] = {}
     overall = "healthy"
@@ -66,10 +69,11 @@ def handler(event: dict, context) -> dict:
         "duration_ms": duration_ms,
         "components": components,
         "version": "1.0.0",
+        "traceId": request_id,
     }
 
     status_code = 200 if overall != "unhealthy" else 503
-    return response.success(body, status_code=status_code)
+    return response.success(body, status_code=status_code, trace_id=request_id)
 
 
 def _check_dynamodb() -> dict:

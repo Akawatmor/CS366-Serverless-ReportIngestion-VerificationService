@@ -1,71 +1,102 @@
 """
 Standardised API response builder — ensures every Lambda response
 follows the same shape expected by API Gateway (proxy integration).
+
+Features:
+  - X-Trace-Id header for request tracing across services
+  - Structured error responses with traceId, errorCode, timestamp
+  - Deprecation headers for API versioning (X-Deprecated-Version, X-Sunset-Date)
 """
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 
-CORS_HEADERS = {
-    "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key",
-}
+def _build_headers(trace_id: str | None = None, deprecated: bool = False, sunset_date: str | None = None) -> dict:
+    """Build response headers with optional tracing and deprecation info."""
+    headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, X-Trace-Id",
+        "Access-Control-Expose-Headers": "X-Trace-Id, X-Deprecated-Version, X-Sunset-Date",
+    }
+    if trace_id:
+        headers["X-Trace-Id"] = trace_id
+    if deprecated:
+        headers["X-Deprecated-Version"] = "true"
+    if sunset_date:
+        headers["X-Sunset-Date"] = sunset_date
+    return headers
 
 
-def success(body: Any, status_code: int = 200) -> dict:
+# Keep for backward compatibility
+CORS_HEADERS = _build_headers()
+
+
+def success(body: Any, status_code: int = 200, trace_id: str | None = None) -> dict:
     """Return a successful API Gateway response."""
     return {
         "statusCode": status_code,
-        "headers": CORS_HEADERS,
+        "headers": _build_headers(trace_id),
         "body": json.dumps(body, ensure_ascii=False, default=str),
     }
 
 
-def accepted(body: Any) -> dict:
+def accepted(body: Any, trace_id: str | None = None) -> dict:
     """202 Accepted — used for async ingestion."""
-    return success(body, status_code=202)
+    return success(body, status_code=202, trace_id=trace_id)
 
 
-def error(status_code: int, message: str, detail: str | None = None) -> dict:
-    """Return an error API Gateway response."""
+def error(
+    status_code: int,
+    message: str,
+    detail: str | None = None,
+    trace_id: str | None = None,
+    error_code: str | None = None,
+) -> dict:
+    """Return an error API Gateway response with tracing info."""
     body: dict[str, Any] = {
         "error": True,
         "message": message,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+    if trace_id:
+        body["traceId"] = trace_id
+    if error_code:
+        body["errorCode"] = error_code
     if detail:
         body["detail"] = detail
     return {
         "statusCode": status_code,
-        "headers": CORS_HEADERS,
+        "headers": _build_headers(trace_id),
         "body": json.dumps(body, ensure_ascii=False, default=str),
     }
 
 
-def bad_request(message: str = "Bad Request", detail: str | None = None) -> dict:
-    return error(400, message, detail)
+def bad_request(message: str = "Bad Request", detail: str | None = None, trace_id: str | None = None) -> dict:
+    return error(400, message, detail, trace_id=trace_id, error_code="E400")
 
 
-def unauthorized(message: str = "Unauthorized") -> dict:
-    return error(401, message)
+def unauthorized(message: str = "Unauthorized", trace_id: str | None = None) -> dict:
+    return error(401, message, trace_id=trace_id, error_code="E401")
 
 
-def forbidden(message: str = "Forbidden") -> dict:
-    return error(403, message)
+def forbidden(message: str = "Forbidden", trace_id: str | None = None) -> dict:
+    return error(403, message, trace_id=trace_id, error_code="E403")
 
 
-def not_found(message: str = "Not Found") -> dict:
-    return error(404, message)
+def not_found(message: str = "Not Found", trace_id: str | None = None) -> dict:
+    return error(404, message, trace_id=trace_id, error_code="E404")
 
 
-def conflict(message: str = "Conflict") -> dict:
-    return error(409, message)
+def conflict(message: str = "Conflict", trace_id: str | None = None) -> dict:
+    return error(409, message, trace_id=trace_id, error_code="E409")
 
 
-def too_many_requests(message: str = "Too Many Requests") -> dict:
-    return error(429, message)
+def too_many_requests(message: str = "Too Many Requests", trace_id: str | None = None) -> dict:
+    return error(429, message, trace_id=trace_id, error_code="E429")
 
 
-def internal_error(message: str = "Internal Server Error") -> dict:
-    return error(500, message)
+def internal_error(message: str = "Internal Server Error", trace_id: str | None = None) -> dict:
+    return error(500, message, trace_id=trace_id, error_code="E500")

@@ -44,19 +44,20 @@ def handler(event: dict, context) -> dict:
     try:
         body = json.loads(event.get("body", "{}") or "{}")
     except (json.JSONDecodeError, TypeError):
-        return response.bad_request("Invalid JSON body.")
+        return response.bad_request("Invalid JSON body.", trace_id=request_id)
 
     # --- Check payload size ---
     raw_body = event.get("body", "")
     if len(raw_body.encode("utf-8")) > config.MAX_PAYLOAD_BYTES:
         return response.bad_request(
-            f"Payload exceeds maximum size of {config.MAX_PAYLOAD_BYTES // 1024}KB."
+            f"Payload exceeds maximum size of {config.MAX_PAYLOAD_BYTES // 1024}KB.",
+            trace_id=request_id,
         )
 
     # --- Validate ---
     errors = validate_ingest_payload(body)
     if errors:
-        return response.bad_request("Validation failed.", detail="; ".join(errors))
+        return response.bad_request("Validation failed.", detail="; ".join(errors), trace_id=request_id)
 
     # --- Generate report_id ---
     report_id = f"r-{uuid.uuid4().hex[:12]}"
@@ -92,7 +93,7 @@ def handler(event: dict, context) -> dict:
             "request_id": request_id,
             "data": {"error": str(e), "report_id": report_id},
         })
-        return response.internal_error("Failed to queue report for processing.")
+        return response.internal_error("Failed to queue report for processing.", trace_id=request_id)
 
     duration_ms = int((time.time() - start) * 1000)
     logger.info("Report queued", extra={
@@ -105,4 +106,5 @@ def handler(event: dict, context) -> dict:
         "report_id": report_id,
         "message": "Report accepted and queued for processing.",
         "estimated_wait_time": "2s",
-    })
+        "traceId": request_id,
+    }, trace_id=request_id)
