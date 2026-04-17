@@ -194,5 +194,3 @@ detail = {
 
 ---
 
-**Tested by:** GitHub Copilot CLI  
-**Test Date:** 2026-04-08 07:43 UTC

@@ -43,7 +43,3 @@ Consumer Review Sheet คือการ review **service ของเพื่�
 - Version metadata: line 314
 - API paths: lines 100-106
 
----
-
-**Updated by:** Copilot  
-**Date:** 2026-04-07
