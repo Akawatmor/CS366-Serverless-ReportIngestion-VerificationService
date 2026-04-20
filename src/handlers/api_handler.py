@@ -71,6 +71,27 @@ _STATS_CACHE: dict[str, dict[str, Any]] = {}
 
 CHANGELOG_ENTRIES: list[dict[str, str]] = [
     {
+        "id": "2026-04-20-deprecation-info",
+        "title": "Added deprecation info endpoint and improved deprecation headers",
+        "description": (
+            "New GET /v1/deprecation-info returns all deprecated or sunset endpoints. "
+            "Deprecation headers X-Deprecated-Version and X-Sunset-Date are now "
+            "included in success responses when applicable."
+        ),
+        "version": "1.2.0",
+        "published_at": "2026-04-20T08:00:00+00:00",
+    },
+    {
+        "id": "2026-04-20-trace-cloudwatch",
+        "title": "Added trace lookup guide and CloudWatch tracing support",
+        "description": (
+            "X-Trace-Id can now be used to search CloudWatch Logs across all Lambda "
+            "functions for end-to-end request tracing."
+        ),
+        "version": "1.1.1",
+        "published_at": "2026-04-20T07:00:00+00:00",
+    },
+    {
         "id": "2026-04-19-openapi-rss",
         "title": "Added OpenAPI specification and RSS changelog endpoint",
         "description": (
@@ -146,6 +167,13 @@ def handler(event: dict, context) -> dict:
 
         elif method == "GET" and "changelog.xml" in path:
             result = _handle_changelog_rss(event, request_id)
+
+        elif method == "GET" and "deprecation-info" in path:
+            result = _handle_deprecation_info(request_id)
+
+        elif method == "GET" and "/trace/" in path:
+            trace_target = path_params.get("trace_id") or path.rstrip("/").rsplit("/", 1)[-1]
+            result = _handle_trace_lookup(trace_target, request_id)
 
         elif method == "POST" and "/upload-url" in path:
             body = _parse_body(event, request_id)
@@ -1077,6 +1105,111 @@ def _handle_changelog_rss(event: dict, trace_id: str | None = None) -> dict:
     api_base_url = _resolve_api_base_url(event)
     xml_body = _build_changelog_rss_xml(api_base_url)
     return response.xml(xml_body, trace_id=trace_id)
+
+
+# ---------------------------------------------------------------------------
+# Deprecation Notes
+# ---------------------------------------------------------------------------
+
+# Registry of deprecated endpoints with sunset dates.
+DEPRECATION_REGISTRY: list[dict[str, str]] = [
+    {
+        "endpoint": "GET /v0/reports (example)",
+        "deprecated_since": "2026-04-01",
+        "sunset_date": "2026-07-01",
+        "migration_guide": "Use GET /v1/reports instead. See docs/VERSIONING_POLICY.md for details.",
+        "status": "deprecated",
+    },
+]
+
+
+def _handle_deprecation_info(trace_id: str | None = None) -> dict:
+    """Return deprecation info for all endpoints, including active and upcoming sunsets."""
+    active = [d for d in DEPRECATION_REGISTRY if d.get("status") == "deprecated"]
+    sunset = [d for d in DEPRECATION_REGISTRY if d.get("status") == "sunset"]
+
+    return response.success({
+        "deprecation_policy_url": "docs/VERSIONING_POLICY.md",
+        "changelog_url": "/v1/changelog.xml",
+        "active_deprecations": active,
+        "sunset_endpoints": sunset,
+        "note": (
+            "Deprecated endpoints return X-Deprecated-Version: true and "
+            "X-Sunset-Date headers. Monitor these headers in your integration."
+        ),
+    }, trace_id=trace_id)
+
+
+# ---------------------------------------------------------------------------
+# Trace Lookup — search CloudWatch Logs by traceId
+# ---------------------------------------------------------------------------
+
+def _handle_trace_lookup(target_trace_id: str, trace_id: str | None = None) -> dict:
+    """Search CloudWatch Logs for a given traceId across all Lambda log groups."""
+    if not target_trace_id or len(target_trace_id) < 8:
+        return response.bad_request("Invalid trace ID.", trace_id=trace_id)
+
+    logs_client = boto3.client("logs", region_name=config.AWS_REGION)
+
+    # Lambda function log groups to search
+    prefix = config.REPORTS_TABLE.replace("-reports", "")
+    log_groups = [
+        f"/aws/lambda/{prefix}-api-handler",
+        f"/aws/lambda/{prefix}-ingest-handler",
+        f"/aws/lambda/{prefix}-ingestion-worker",
+        f"/aws/lambda/{prefix}-health-handler",
+    ]
+
+    trace_results: list[dict] = []
+
+    # CloudWatch filter patterns treat '-' as NOT operator.
+    # Use only the first hex segment of UUID (8 chars, no hyphen) as filter term.
+    cw_filter = target_trace_id.split("-")[0]
+
+    for lg in log_groups:
+        try:
+            kwargs: dict = {
+                "logGroupName": lg,
+                "filterPattern": cw_filter,
+                "limit": 50,
+                "interleaved": True,
+            }
+            while len(trace_results) < 100:
+                resp = logs_client.filter_log_events(**kwargs)
+                for ev in resp.get("events", []):
+                    trace_results.append({
+                        "log_group": lg,
+                        "timestamp": ev.get("timestamp"),
+                        "message": (ev.get("message", ""))[:500],
+                    })
+                next_token = resp.get("nextToken")
+                if not next_token:
+                    break
+                kwargs["nextToken"] = next_token
+        except logs_client.exceptions.ResourceNotFoundException:
+            continue
+        except Exception as e:
+            logger.warning(f"Trace search failed for {lg}: {e}")
+            continue
+
+    trace_results.sort(key=lambda x: x.get("timestamp", 0))
+
+    return response.success({
+        "target_trace_id": target_trace_id,
+        "total_log_entries": len(trace_results),
+        "log_groups_searched": log_groups,
+        "results": trace_results[:50],
+        "cloudwatch_insights_query": (
+            f'fields @timestamp, @message | filter @message like "{target_trace_id}" '
+            "| sort @timestamp asc | limit 100"
+        ),
+        "how_to_trace": {
+            "step_1": "Copy the X-Trace-Id from any API response header or traceId from JSON body",
+            "step_2": "Use GET /v1/reports/trace/{traceId} to search logs automatically",
+            "step_3": "Or go to AWS CloudWatch → Logs Insights and run the query above",
+            "step_4": "Select all Lambda log groups for this service to get the full request flow",
+        },
+    }, trace_id=trace_id)
 
 def _parse_body(event: dict, trace_id: str | None = None) -> dict:
     """Parse JSON body from API Gateway event."""

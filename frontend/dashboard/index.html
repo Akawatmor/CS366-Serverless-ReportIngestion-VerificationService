@@ -386,6 +386,7 @@
     <div class="navbar-links">
         <a href="/">Home</a>
         <a href="/dashboard/" class="active">Dashboard</a>
+        <a href="/admin-verify/">Admin Verify</a>
         <a href="https://github.com/Akawatmor/CS366-Serverless-ReportIngestion-VerificationService" target="_blank">GitHub</a>
     </div>
 </nav>
@@ -430,6 +431,12 @@
     </div>
     <div class="sidebar-item" onclick="showPanel('changelog')">
         <span class="sidebar-method GET">GET</span> /changelog.xml
+    </div>
+    <div class="sidebar-item" onclick="showPanel('deprecation')">
+        <span class="sidebar-method GET">GET</span> /deprecation-info
+    </div>
+    <div class="sidebar-item" onclick="showPanel('trace')">
+        <span class="sidebar-method GET">GET</span> /reports/trace/{id}
     </div>
 
     <div class="sidebar-section">Quick Actions</div>
@@ -761,7 +768,7 @@
             <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
             <span class="panel-title">/reports/stats</span>
         </div>
-        <p class="panel-desc">Dashboard summary statistics using Atomic Counter Table. Reads pre-aggregated data for millisecond response times.</p>
+        <p class="panel-desc">Dashboard summary statistics using Atomic Counter Table. Includes heatmap data and trending keywords.</p>
 
         <div id="stats-cards"></div>
 
@@ -781,10 +788,28 @@
                             <option value="last_7d">Last 7 Days</option>
                         </select>
                     </div>
+                    <div>
+                        <label class="form-label-sm">Region Filter</label>
+                        <select class="form-input-sm" id="stats-region">
+                            <option value="">All Regions</option>
+                            <option value="bkk">Bangkok</option>
+                            <option value="central">Central</option>
+                            <option value="north">North</option>
+                            <option value="northeast">Northeast</option>
+                            <option value="south">South</option>
+                        </select>
+                    </div>
                 </div>
             </div>
         </div>
-        <div class="response-card">
+
+        <!-- Trending Keywords -->
+        <div id="stats-trending" style="margin-top:1rem;"></div>
+
+        <!-- Heatmap Table -->
+        <div id="stats-heatmap" style="margin-top:1rem;"></div>
+
+        <div class="response-card" style="margin-top:1rem;">
             <div class="response-header">
                 <div class="response-status" id="stats-status">Response</div>
                 <div class="response-meta" id="stats-meta"></div>
@@ -956,6 +981,67 @@
                 <div class="response-meta" id="changelog-meta"></div>
             </div>
             <div id="changelog-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== DEPRECATION INFO PANEL ==================== -->
+    <div class="api-panel" id="panel-deprecation">
+        <div class="panel-header">
+            <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
+            <span class="panel-title">/deprecation-info</span>
+        </div>
+        <p class="panel-desc">View all deprecated endpoints, sunset dates, and migration guides.</p>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method GET">GET</span>
+                <span class="request-url">/deprecation-info</span>
+                <button class="btn-send" onclick="sendDeprecationInfo()">&#9654; Send</button>
+            </div>
+        </div>
+
+        <div id="deprecation-info-cards"></div>
+
+        <div class="response-card" style="margin-top:1rem;">
+            <div class="response-header">
+                <div class="response-status" id="deprecation-status">Response</div>
+                <div class="response-meta" id="deprecation-meta"></div>
+            </div>
+            <div id="deprecation-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== TRACE LOOKUP PANEL ==================== -->
+    <div class="api-panel" id="panel-trace">
+        <div class="panel-header">
+            <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
+            <span class="panel-title">/reports/trace/{trace_id}</span>
+        </div>
+        <p class="panel-desc">Search CloudWatch Logs by X-Trace-Id for end-to-end request tracing across all Lambda functions.</p>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method GET">GET</span>
+                <span class="request-url">/reports/trace/{trace_id}</span>
+                <button class="btn-send" onclick="sendTrace()">&#9654; Send</button>
+            </div>
+            <div class="request-body">
+                <div class="form-group">
+                    <label class="form-label-sm">Trace ID (from X-Trace-Id header or traceId in response body)</label>
+                    <input type="text" class="form-input-sm" id="trace-id" placeholder="e.g. 4b96bc3c-bbff-40e7-a57f-9281d5b90875">
+                    <div class="form-hint">Copy from any API response's X-Trace-Id header or traceId field</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="trace-results"></div>
+
+        <div class="response-card" style="margin-top:1rem;">
+            <div class="response-header">
+                <div class="response-status" id="trace-status">Response</div>
+                <div class="response-meta" id="trace-meta"></div>
+            </div>
+            <div id="trace-response" class="response-empty">Send a request to see the response</div>
         </div>
     </div>
 
@@ -1415,9 +1501,13 @@ async function sendDelete() {
 // =========================================
 async function sendStats() {
     const tf = document.getElementById('stats-timeframe').value;
+    const region = document.getElementById('stats-region').value;
+
+    const qp = { timeframe: tf };
+    if (region) qp.region = region;
 
     try {
-        const r = await apiRequest('GET', buildOperationPath('getReportStats', 'GET', {}, { timeframe: tf }));
+        const r = await apiRequest('GET', buildOperationPath('getReportStats', 'GET', {}, qp));
         updateResponseUI('stats', r);
 
         // Render stat cards
@@ -1429,6 +1519,71 @@ async function sendStats() {
                 <div class="stat-card"><div class="stat-value" style="color:var(--success)">${s.verified_incidents || 0}</div><div class="stat-label">Verified</div></div>
                 <div class="stat-card"><div class="stat-value" style="color:var(--danger)">${s.spam_rejected || 0}</div><div class="stat-label">Spam / Rejected</div></div>
             </div>`;
+        }
+
+        // Render trending keywords
+        const trendingEl = document.getElementById('stats-trending');
+        if (r.data && r.data.trending_keywords && r.data.trending_keywords.length > 0) {
+            const keywords = r.data.trending_keywords;
+            trendingEl.innerHTML = `
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+                    <h3 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem;">&#128293; Trending Keywords</h3>
+                    <div style="display:flex;flex-wrap:wrap;gap:0.5rem;">
+                        ${keywords.map(kw => {
+                            const size = Math.max(0.75, Math.min(1.4, 0.75 + kw.count * 0.1));
+                            return `<span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.3rem 0.7rem;
+                                background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;font-size:${size}rem;font-weight:600;color:#1e40af;">
+                                ${escapeHtml(kw.keyword)} <span style="font-size:0.7rem;font-weight:400;color:#64748b;">(${kw.count})</span>
+                                ${kw.category ? `<span style="font-size:0.6rem;background:#fef3c7;color:#92400e;padding:0.1rem 0.3rem;border-radius:3px;">${escapeHtml(kw.category)}</span>` : ''}
+                            </span>`;
+                        }).join('')}
+                    </div>
+                </div>`;
+        } else {
+            trendingEl.innerHTML = '';
+        }
+
+        // Render heatmap data table
+        const heatmapEl = document.getElementById('stats-heatmap');
+        if (r.data && r.data.heatmap_data && r.data.heatmap_data.length > 0) {
+            const points = r.data.heatmap_data;
+            heatmapEl.innerHTML = `
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+                    <h3 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem;">&#127758; Heatmap Data (${points.length} points)</h3>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                            <thead>
+                                <tr style="background:#f8fafc;border-bottom:2px solid var(--border);">
+                                    <th style="padding:0.5rem;text-align:left;">Latitude</th>
+                                    <th style="padding:0.5rem;text-align:left;">Longitude</th>
+                                    <th style="padding:0.5rem;text-align:left;">Count</th>
+                                    <th style="padding:0.5rem;text-align:left;">Region</th>
+                                    <th style="padding:0.5rem;text-align:left;">Map</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${points.map(p => `
+                                    <tr style="border-bottom:1px solid var(--border);">
+                                        <td style="padding:0.5rem;font-family:monospace;">${parseFloat(p.lat).toFixed(4)}</td>
+                                        <td style="padding:0.5rem;font-family:monospace;">${parseFloat(p.lon).toFixed(4)}</td>
+                                        <td style="padding:0.5rem;">
+                                            <span style="display:inline-block;background:${p.count >= 5 ? 'var(--danger)' : p.count >= 3 ? 'var(--warning)' : 'var(--info)'};
+                                                color:white;padding:0.15rem 0.5rem;border-radius:10px;font-weight:700;font-size:0.8rem;">${p.count}</span>
+                                        </td>
+                                        <td style="padding:0.5rem;">${escapeHtml(p.region || 'unknown')}</td>
+                                        <td style="padding:0.5rem;">
+                                            <a href="https://www.google.com/maps?q=${p.lat},${p.lon}" target="_blank" style="color:var(--primary);font-size:0.8rem;">&#127758; View</a>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    ${r.data.supported_regions ? `<p style="font-size:0.75rem;color:var(--text-light);margin-top:0.5rem;">
+                        Supported regions: ${r.data.supported_regions.join(', ')}</p>` : ''}
+                </div>`;
+        } else {
+            heatmapEl.innerHTML = '';
         }
     } catch (e) {
         showToast(e.message, 'error');
@@ -1664,6 +1819,94 @@ async function sendChangelog() {
     try {
         const r = await apiRequest('GET', buildOperationPath('getChangelogRss', 'GET'));
         updateResponseUI('changelog', r);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// =========================================
+// Deprecation Info
+// =========================================
+async function sendDeprecationInfo() {
+    try {
+        const r = await apiRequest('GET', '/deprecation-info');
+        updateResponseUI('deprecation', r);
+
+        const container = document.getElementById('deprecation-info-cards');
+        if (r.data && !r.data.error) {
+            const active = r.data.active_deprecations || [];
+            const sunset = r.data.sunset_endpoints || [];
+            container.innerHTML = `
+                <div style="margin-top:1rem;">
+                    ${active.length > 0 ? `
+                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:1rem;margin-bottom:0.75rem;">
+                        <h3 style="font-size:0.9rem;font-weight:700;color:#92400e;margin-bottom:0.5rem;">&#9888; Active Deprecations (${active.length})</h3>
+                        ${active.map(d => `
+                            <div style="padding:0.5rem;background:white;border-radius:6px;margin-bottom:0.5rem;border:1px solid #fde68a;">
+                                <strong>${escapeHtml(d.endpoint)}</strong>
+                                <span style="font-size:0.8rem;color:#92400e;float:right;">Sunset: ${d.sunset_date}</span>
+                                <p style="font-size:0.82rem;color:var(--text-light);margin-top:0.25rem;">${escapeHtml(d.migration_guide)}</p>
+                            </div>
+                        `).join('')}
+                    </div>` : '<div style="padding:1rem;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;margin-bottom:0.75rem;"><p style="color:var(--success);font-weight:600;">&#10003; No active deprecations</p></div>'}
+                    ${sunset.length > 0 ? `
+                    <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:1rem;">
+                        <h3 style="font-size:0.9rem;font-weight:700;color:#991b1b;margin-bottom:0.5rem;">&#10060; Sunset Endpoints (${sunset.length})</h3>
+                        ${sunset.map(d => `<div style="padding:0.5rem;"><strong>${escapeHtml(d.endpoint)}</strong></div>`).join('')}
+                    </div>` : ''}
+                    <p style="font-size:0.8rem;color:var(--text-light);margin-top:0.75rem;">${escapeHtml(r.data.note || '')}</p>
+                </div>`;
+        } else {
+            container.innerHTML = '';
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// =========================================
+// Trace Lookup
+// =========================================
+async function sendTrace() {
+    const traceId = document.getElementById('trace-id').value.trim();
+    if (!traceId) { showToast('Please enter a Trace ID', 'error'); return; }
+
+    try {
+        const r = await apiRequest('GET', `/reports/trace/${encodeURIComponent(traceId)}`);
+        updateResponseUI('trace', r);
+
+        const container = document.getElementById('trace-results');
+        if (r.data && !r.data.error) {
+            const results = r.data.results || [];
+            const howTo = r.data.how_to_trace || {};
+            container.innerHTML = `
+                <div style="margin-top:1rem;">
+                    <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:0.75rem;">
+                        <h3 style="font-size:0.9rem;font-weight:700;margin-bottom:0.5rem;">&#128270; Trace Results (${r.data.total_log_entries || 0} entries)</h3>
+                        ${results.length > 0 ? results.map(entry => `
+                            <div style="border-left:3px solid var(--primary);padding:0.4rem 0.75rem;margin-bottom:0.4rem;background:#f8fafc;border-radius:0 6px 6px 0;">
+                                <div style="display:flex;justify-content:space-between;font-size:0.82rem;">
+                                    <span style="color:var(--primary);font-weight:600;">${escapeHtml(entry.log_group.split('/').pop())}</span>
+                                    <span style="color:var(--text-light);">${entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ''}</span>
+                                </div>
+                                <pre style="font-size:0.78rem;color:var(--text);margin:0.25rem 0 0;white-space:pre-wrap;word-break:break-word;">${escapeHtml(entry.message)}</pre>
+                            </div>
+                        `).join('') : '<p style="color:var(--text-light);">No log entries found for this trace ID</p>'}
+                    </div>
+                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:1rem;">
+                        <h3 style="font-size:0.9rem;font-weight:700;color:#065f46;margin-bottom:0.5rem;">&#128218; How to Trace</h3>
+                        <ol style="font-size:0.85rem;color:var(--text);padding-left:1.25rem;line-height:1.8;">
+                            ${Object.values(howTo).map(step => `<li>${escapeHtml(step)}</li>`).join('')}
+                        </ol>
+                        ${r.data.cloudwatch_insights_query ? `
+                        <div style="margin-top:0.5rem;padding:0.5rem;background:var(--code-bg);color:#e2e8f0;border-radius:6px;font-family:monospace;font-size:0.8rem;word-break:break-all;">
+                            ${escapeHtml(r.data.cloudwatch_insights_query)}
+                        </div>` : ''}
+                    </div>
+                </div>`;
+        } else {
+            container.innerHTML = '';
+        }
     } catch (e) {
         showToast(e.message, 'error');
     }

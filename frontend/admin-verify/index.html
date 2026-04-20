@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Verify — Report Verification Console</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --secondary: #0f172a;
+            --accent: #f59e0b;
+            --bg: #f1f5f9;
+            --card-bg: #ffffff;
+            --border: #e2e8f0;
+            --text: #334155;
+            --text-light: #64748b;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --info: #3b82f6;
+            --code-bg: #1e293b;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg); color: var(--text); line-height: 1.5;
+        }
+
+        /* Navbar */
+        .navbar {
+            background: var(--secondary); color: white;
+            padding: 0.75rem 1.5rem;
+            display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 100;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .navbar-brand {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-weight: 700; font-size: 1.1rem;
+            text-decoration: none; color: white;
+        }
+        .navbar-links { display: flex; gap: 1rem; align-items: center; }
+        .navbar-links a {
+            color: rgba(255,255,255,0.7); text-decoration: none;
+            font-size: 0.85rem; padding: 0.35rem 0.75rem;
+            border-radius: 6px; transition: all 0.2s;
+        }
+        .navbar-links a:hover { color: white; background: rgba(255,255,255,0.1); }
+        .navbar-links a.active { color: var(--accent); }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+
+        /* Config bar */
+        .config-bar {
+            background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1.5rem;
+            display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap;
+        }
+        .config-bar .form-group { display: flex; flex-direction: column; gap: 0.2rem; flex: 1; min-width: 200px; }
+        .config-bar label { font-size: 0.72rem; font-weight: 600; color: var(--text-light); text-transform: uppercase; }
+        .config-bar input {
+            padding: 0.45rem 0.65rem; border: 1px solid var(--border); border-radius: 6px;
+            font-size: 0.85rem; font-family: monospace;
+        }
+        .config-bar input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+
+        .btn {
+            padding: 0.5rem 1rem; border: none; border-radius: 6px;
+            cursor: pointer; font-weight: 700; font-size: 0.85rem; white-space: nowrap;
+            display: inline-flex; align-items: center; gap: 0.35rem;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-success:hover { background: #059669; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-warning { background: var(--warning); color: var(--secondary); }
+        .btn-warning:hover { background: #d97706; }
+        .btn-sm { padding: 0.35rem 0.75rem; font-size: 0.8rem; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Toolbar */
+        .toolbar {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;
+        }
+        .toolbar h2 { font-size: 1.25rem; font-weight: 700; }
+        .filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+        .filters select, .filters input {
+            padding: 0.4rem 0.6rem; border: 1px solid var(--border);
+            border-radius: 6px; font-size: 0.85rem;
+        }
+
+        /* Stats row */
+        .stats-row {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.75rem; margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 10px; padding: 1rem; text-align: center;
+        }
+        .stat-value { font-size: 1.75rem; font-weight: 800; color: var(--primary); }
+        .stat-label { font-size: 0.75rem; color: var(--text-light); margin-top: 0.15rem; }
+
+        /* Report cards */
+        .report-card {
+            background: var(--card-bg); border: 1px solid var(--border);
+            border-radius: 10px; margin-bottom: 1rem; overflow: hidden;
+            transition: box-shadow 0.2s;
+        }
+        .report-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .report-card.expanded .report-detail { display: block; }
+
+        .report-summary {
+            display: grid; grid-template-columns: auto 1fr auto auto auto;
+            gap: 1rem; align-items: center; padding: 1rem 1.25rem;
+            cursor: pointer;
+        }
+        .trust-badge {
+            width: 48px; height: 48px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 800; font-size: 1rem; color: white;
+        }
+        .trust-high { background: var(--success); }
+        .trust-mid { background: var(--warning); color: var(--secondary); }
+        .trust-low { background: var(--danger); }
+
+        .report-info h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.15rem; }
+        .report-info p { font-size: 0.82rem; color: var(--text-light); }
+
+        .status-badge {
+            font-size: 0.72rem; font-weight: 700; padding: 0.25rem 0.6rem;
+            border-radius: 20px; white-space: nowrap;
+        }
+        .status-PENDING_REVIEW { background: #fef3c7; color: #92400e; }
+        .status-VERIFIED { background: #d1fae5; color: #065f46; }
+        .status-SPAM { background: #fee2e2; color: #991b1b; }
+        .status-REJECTED { background: #fce7f3; color: #9d174d; }
+        .status-DUPLICATE { background: #e0e7ff; color: #3730a3; }
+        .status-RECEIVED { background: #e2e8f0; color: #475569; }
+
+        .category-badge {
+            font-size: 0.72rem; font-weight: 600; padding: 0.2rem 0.5rem;
+            border-radius: 4px; background: #eff6ff; color: var(--primary);
+        }
+
+        /* Expanded detail */
+        .report-detail {
+            display: none; padding: 0 1.25rem 1.25rem;
+            border-top: 1px solid var(--border);
+        }
+        .detail-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+            margin-top: 1rem;
+        }
+        .detail-section h4 {
+            font-size: 0.8rem; font-weight: 700; color: var(--text-light);
+            text-transform: uppercase; margin-bottom: 0.5rem;
+        }
+        .detail-field { margin-bottom: 0.5rem; }
+        .detail-field label {
+            display: block; font-size: 0.72rem; font-weight: 600;
+            color: var(--text-light); margin-bottom: 0.1rem;
+        }
+        .detail-field span { font-size: 0.85rem; }
+
+        .ai-reasoning {
+            background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;
+            padding: 0.75rem; font-size: 0.85rem; margin-top: 0.5rem;
+            line-height: 1.6;
+        }
+        .tags { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+        .tag {
+            font-size: 0.72rem; background: #e0e7ff; color: #3730a3;
+            padding: 0.15rem 0.45rem; border-radius: 4px;
+        }
+
+        /* Action panel */
+        .action-panel {
+            margin-top: 1rem; padding: 1rem;
+            background: #fafbfc; border: 1px solid var(--border); border-radius: 8px;
+        }
+        .action-panel h4 { font-size: 0.85rem; font-weight: 700; margin-bottom: 0.75rem; }
+        .action-row {
+            display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap;
+        }
+        .action-row .form-group { display: flex; flex-direction: column; gap: 0.2rem; }
+        .action-row label { font-size: 0.72rem; font-weight: 600; color: var(--text-light); }
+        .action-row input, .action-row select {
+            padding: 0.4rem 0.6rem; border: 1px solid var(--border);
+            border-radius: 6px; font-size: 0.85rem;
+        }
+        .action-buttons { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+
+        /* Incident suggestion */
+        .incident-suggestion {
+            margin-top: 1rem; padding: 1rem;
+            background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;
+        }
+        .incident-suggestion h4 {
+            font-size: 0.85rem; font-weight: 700; color: #92400e; margin-bottom: 0.5rem;
+        }
+        .incident-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.5rem;
+        }
+        .incident-field label {
+            display: block; font-size: 0.72rem; color: #92400e; font-weight: 600;
+        }
+        .incident-field span { font-size: 0.85rem; font-weight: 500; }
+
+        /* Media preview */
+        .media-previews { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+        .media-thumb {
+            width: 80px; height: 80px; border-radius: 6px;
+            object-fit: cover; border: 1px solid var(--border); cursor: pointer;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 1.5rem; right: 1.5rem;
+            padding: 0.75rem 1.25rem; border-radius: 8px;
+            color: white; font-size: 0.85rem; font-weight: 600;
+            z-index: 1000; transform: translateY(100px); opacity: 0;
+            transition: all 0.3s;
+        }
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { background: var(--success); }
+        .toast.error { background: var(--danger); }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center; padding: 3rem; color: var(--text-light);
+        }
+        .empty-state .icon { font-size: 3rem; margin-bottom: 0.75rem; }
+
+        /* Loading */
+        .loading { text-align: center; padding: 2rem; color: var(--text-light); }
+
+        @media (max-width: 768px) {
+            .report-summary { grid-template-columns: auto 1fr auto; }
+            .detail-grid { grid-template-columns: 1fr; }
+            .action-row { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="navbar">
+    <a href="/" class="navbar-brand">&#9881; Report Verify &mdash; Admin Console</a>
+    <div class="navbar-links">
+        <a href="/">Home</a>
+        <a href="/dashboard/">Dashboard</a>
+        <a href="/admin-verify/" class="active">Admin Verify</a>
+    </div>
+</nav>
+
+<div class="container">
+
+    <!-- Config Bar -->
+    <div class="config-bar">
+        <div class="form-group">
+            <label>API Base URL</label>
+            <input type="text" id="cfg-url" placeholder="https://xxx.execute-api.us-east-1.amazonaws.com/dev/v1">
+        </div>
+        <div class="form-group" style="max-width:250px;">
+            <label>API Key</label>
+            <input type="password" id="cfg-key" placeholder="Your API Key">
+        </div>
+        <button class="btn btn-primary" onclick="saveConfig()">Save</button>
+        <button class="btn btn-primary" onclick="loadReports()">&#8635; Refresh</button>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="stats-row" id="stats-row">
+        <div class="stat-card"><div class="stat-value" id="stat-pending">-</div><div class="stat-label">Pending Review</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-verified" style="color:var(--success)">-</div><div class="stat-label">Verified</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-spam" style="color:var(--danger)">-</div><div class="stat-label">Spam / Rejected</div></div>
+        <div class="stat-card"><div class="stat-value" id="stat-total">-</div><div class="stat-label">Total Today</div></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+        <h2>&#128203; Reports Queue</h2>
+        <div class="filters">
+            <select id="filter-status" onchange="loadReports()">
+                <option value="PENDING_REVIEW">Pending Review</option>
+                <option value="RECEIVED">Received</option>
+                <option value="VERIFIED">Verified</option>
+                <option value="SPAM">Spam</option>
+                <option value="REJECTED">Rejected</option>
+                <option value="DUPLICATE">Duplicate</option>
+            </select>
+            <select id="filter-priority" onchange="loadReports()">
+                <option value="all">All Priority</option>
+                <option value="high">High Priority</option>
+                <option value="normal">Normal</option>
+            </select>
+            <input type="number" id="filter-min-score" placeholder="Min Score" min="0" max="100" style="width:100px;" onchange="loadReports()">
+            <input type="number" id="filter-limit" value="20" min="1" max="100" style="width:70px;">
+        </div>
+    </div>
+
+    <!-- Reports List -->
+    <div id="reports-container">
+        <div class="empty-state">
+            <div class="icon">&#128269;</div>
+            <p>Configure API URL and click Refresh to load reports</p>
+        </div>
+    </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const CONFIG = {
+    baseUrl: localStorage.getItem('api_base_url') || '',
+    apiKey: localStorage.getItem('api_key') || '',
+};
+document.getElementById('cfg-url').value = CONFIG.baseUrl;
+document.getElementById('cfg-key').value = CONFIG.apiKey;
+
+let reportsCache = {};
+
+function saveConfig() {
+    CONFIG.baseUrl = document.getElementById('cfg-url').value.replace(/\/+$/, '');
+    CONFIG.apiKey = document.getElementById('cfg-key').value;
+    localStorage.setItem('api_base_url', CONFIG.baseUrl);
+    localStorage.setItem('api_key', CONFIG.apiKey);
+    showToast('Config saved!', 'success');
+}
+
+function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = `toast ${type} show`;
+    setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str || '';
+    return d.innerHTML;
+}
+
+async function apiRequest(method, path, body = null) {
+    const url = `${CONFIG.baseUrl}${path}`;
+    const headers = { 'Accept': 'application/json', 'Content-Type': 'application/json' };
+    if (CONFIG.apiKey) headers['X-Api-Key'] = CONFIG.apiKey;
+    const opts = { method, headers };
+    if (body) opts.body = JSON.stringify(body);
+    const resp = await fetch(url, opts);
+    const data = await resp.json().catch(() => null);
+    return { status: resp.status, data };
+}
+
+// ---- Load stats ----
+async function loadStats() {
+    try {
+        const r = await apiRequest('GET', '/reports/stats?timeframe=today');
+        if (r.data && r.data.summary) {
+            const s = r.data.summary;
+            document.getElementById('stat-pending').textContent = s.pending_review || 0;
+            document.getElementById('stat-verified').textContent = s.verified_incidents || 0;
+            document.getElementById('stat-spam').textContent = s.spam_rejected || 0;
+            document.getElementById('stat-total').textContent = s.total_received_today || 0;
+        }
+    } catch (e) { console.error('Stats load failed:', e); }
+}
+
+// ---- Load reports ----
+async function loadReports() {
+    const container = document.getElementById('reports-container');
+    container.innerHTML = '<div class="loading">Loading reports...</div>';
+
+    const status = document.getElementById('filter-status').value;
+    const priority = document.getElementById('filter-priority').value;
+    const minScore = document.getElementById('filter-min-score').value;
+    const limit = document.getElementById('filter-limit').value || '20';
+
+    let qs = `?status=${status}&limit=${limit}`;
+    if (priority !== 'all') qs += `&priority=${priority}`;
+    if (minScore) qs += `&min_trust_score=${minScore}`;
+
+    try {
+        const r = await apiRequest('GET', `/reports${qs}`);
+        if (!r.data || !r.data.data || r.data.data.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">&#128203;</div><p>No reports found for this filter</p></div>';
+            loadStats();
+            return;
+        }
+        renderReports(r.data.data, container);
+        loadStats();
+    } catch (e) {
+        container.innerHTML = `<div class="empty-state"><div class="icon">&#9888;</div><p>Error: ${escapeHtml(e.message)}</p></div>`;
+    }
+}
+
+function renderReports(reports, container) {
+    container.innerHTML = '';
+    reports.forEach(r => {
+        const score = r.trust_score || 0;
+        const scoreClass = score >= 70 ? 'trust-high' : score >= 30 ? 'trust-mid' : 'trust-low';
+        const status = r.validation_status || r.status || document.getElementById('filter-status').value || 'UNKNOWN';
+        const category = r.suggested_category || 'N/A';
+        const content = r.content || r.raw_content || r.report_id;
+
+        const card = document.createElement('div');
+        card.className = 'report-card';
+        card.id = `card-${r.report_id}`;
+        card.innerHTML = `
+            <div class="report-summary" onclick="toggleDetail('${r.report_id}')">
+                <div class="trust-badge ${scoreClass}">${score}</div>
+                <div class="report-info">
+                    <h3>${escapeHtml(content.substring(0, 100))}${content.length > 100 ? '...' : ''}</h3>
+                    <p>${r.report_id} &bull; ${r.time_ago || r.ingested_at || ''} &bull; ${r.reporter_source || ''}</p>
+                </div>
+                <span class="category-badge">${escapeHtml(category)}</span>
+                <span class="status-badge status-${status}">${status}</span>
+                <span style="font-size:0.85rem;color:var(--text-light);">&#9660;</span>
+            </div>
+            <div class="report-detail" id="detail-${r.report_id}">
+                <div class="loading">Loading detail...</div>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+async function toggleDetail(reportId) {
+    const card = document.getElementById(`card-${reportId}`);
+    if (card.classList.contains('expanded')) {
+        card.classList.remove('expanded');
+        return;
+    }
+    card.classList.add('expanded');
+
+    const detailEl = document.getElementById(`detail-${reportId}`);
+    if (reportsCache[reportId]) {
+        renderDetail(reportsCache[reportId], detailEl, reportId);
+        return;
+    }
+
+    try {
+        const r = await apiRequest('GET', `/reports/${reportId}`);
+        if (r.data && !r.data.error) {
+            reportsCache[reportId] = r.data;
+            renderDetail(r.data, detailEl, reportId);
+        } else {
+            detailEl.innerHTML = `<p style="color:var(--danger);padding:1rem;">Error loading detail</p>`;
+        }
+    } catch (e) {
+        detailEl.innerHTML = `<p style="color:var(--danger);padding:1rem;">${escapeHtml(e.message)}</p>`;
+    }
+}
+
+function renderDetail(report, container, reportId) {
+    const geo = report.geo_location || {};
+    const analysis = report.analysis || {};
+    const tags = analysis.ai_analysis_tags || report.ai_analysis_tags || [];
+    const mediaUrls = report.content?.images || report.media_urls || [];
+    const score = analysis.trust_score ?? report.trust_score ?? 0;
+
+    // Suggest incident type based on AI analysis
+    const suggestedType = analysis.suggested_category || report.suggested_category || 'OTHER';
+    const severityGuess = score >= 80 ? 'HIGH (3-5)' : score >= 50 ? 'MEDIUM (2-3)' : 'LOW (1-2)';
+
+    container.innerHTML = `
+        <div class="detail-grid">
+            <div class="detail-section">
+                <h4>&#128196; Report Content</h4>
+                <div class="detail-field">
+                    <label>Raw Content</label>
+                    <span>${escapeHtml(report.content?.text || report.raw_content || '')}</span>
+                </div>
+                <div class="detail-field">
+                    <label>Reporter</label>
+                    <span>${escapeHtml(report.reporter_info?.reporter_id || report.reporter_id || '')} (${escapeHtml(report.reporter_info?.source || report.reporter_source || '')})</span>
+                </div>
+                <div class="detail-field">
+                    <label>Location</label>
+                    <span>${geo.lat ? `${geo.lat}, ${geo.lon}` : 'N/A'}</span>
+                    ${geo.lat ? `<a href="https://www.google.com/maps?q=${geo.lat},${geo.lon}" target="_blank" style="font-size:0.8rem;margin-left:0.5rem;">&#127758; Map</a>` : ''}
+                </div>
+                <div class="detail-field">
+                    <label>Ingested At</label>
+                    <span>${report.created_at || report.ingested_at || 'N/A'}</span>
+                </div>
+                ${mediaUrls.length > 0 ? `
+                <div class="detail-field">
+                    <label>Media Evidence</label>
+                    <div class="media-previews">
+                        ${mediaUrls.map(url => `<img src="${escapeHtml(url)}" class="media-thumb" onclick="window.open('${escapeHtml(url)}')" onerror="this.style.display='none'" alt="evidence">`).join('')}
+                    </div>
+                </div>` : ''}
+            </div>
+            <div class="detail-section">
+                <h4>&#129302; AI Analysis</h4>
+                <div class="detail-field">
+                    <label>Trust Score</label>
+                    <span style="font-weight:700;font-size:1.1rem;">${score}/100</span>
+                </div>
+                <div class="detail-field">
+                    <label>Category</label>
+                    <span class="category-badge">${escapeHtml(suggestedType)}</span>
+                </div>
+                <div class="detail-field">
+                    <label>Tags</label>
+                    <div class="tags">${tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join('') || 'None'}</div>
+                </div>
+                ${(analysis.ai_reasoning || report.ai_reasoning) ? `
+                <div class="detail-field">
+                    <label>AI Reasoning</label>
+                    <div class="ai-reasoning">${escapeHtml(analysis.ai_reasoning || report.ai_reasoning)}</div>
+                </div>` : ''}
+            </div>
+        </div>
+
+        <!-- Incident Suggestion -->
+        <div class="incident-suggestion">
+            <h4>&#128161; Suggested Incident Creation</h4>
+            <div class="incident-grid">
+                <div class="incident-field">
+                    <label>Type</label>
+                    <span>${escapeHtml(suggestedType)}</span>
+                </div>
+                <div class="incident-field">
+                    <label>Estimated Severity</label>
+                    <span>${severityGuess}</span>
+                </div>
+                <div class="incident-field">
+                    <label>Location</label>
+                    <span>${geo.lat ? `${parseFloat(geo.lat).toFixed(4)}, ${parseFloat(geo.lon).toFixed(4)}` : 'Unknown'}</span>
+                </div>
+                <div class="incident-field">
+                    <label>Evidence</label>
+                    <span>${mediaUrls.length} file(s)</span>
+                </div>
+            </div>
+            <p style="font-size:0.8rem;color:#92400e;margin-top:0.5rem;">
+                When verified, EventBridge will publish <strong>ReportVerifiedEvent</strong> with this data for downstream Incident Service.
+            </p>
+        </div>
+
+        <!-- Action Panel -->
+        <div class="action-panel">
+            <h4>&#9889; Verification Action</h4>
+            <div class="action-row">
+                <div class="form-group">
+                    <label>Decision</label>
+                    <select id="action-status-${reportId}">
+                        <option value="VERIFIED">&#9989; VERIFY &rarr; Create Incident</option>
+                        <option value="REJECTED">&#10060; REJECT</option>
+                        <option value="SPAM">&#128683; Mark as SPAM</option>
+                        <option value="DUPLICATE">&#128257; Mark as DUPLICATE</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Reviewer ID</label>
+                    <input type="text" id="action-reviewer-${reportId}" value="${localStorage.getItem('reviewer_id') || 'officer_001'}" placeholder="officer_001">
+                </div>
+                <div class="form-group" style="flex:2;">
+                    <label>Notes</label>
+                    <input type="text" id="action-notes-${reportId}" placeholder="Confirmed via CCTV / False alarm / etc.">
+                </div>
+            </div>
+            <div class="action-row" style="margin-top:0.5rem;">
+                <div class="form-group">
+                    <label>Link to Existing Incident (optional)</label>
+                    <input type="text" id="action-incident-${reportId}" placeholder="inc-xxx (merge into existing)">
+                </div>
+            </div>
+            <div class="action-buttons">
+                <button class="btn btn-success" onclick="submitVerification('${reportId}')">&#9654; Submit Decision</button>
+                <button class="btn btn-danger btn-sm" onclick="softDelete('${reportId}')">&#128465; Soft Delete</button>
+            </div>
+        </div>
+
+        <!-- Audit Trail -->
+        <div style="margin-top:1rem;">
+            <h4 style="font-size:0.85rem;font-weight:700;color:var(--text-light);margin-bottom:0.5rem;">&#128220; Audit Trail</h4>
+            <div id="audit-${reportId}" style="font-size:0.85rem;color:var(--text-light);">
+                <button class="btn btn-sm btn-primary" onclick="loadAudit('${reportId}')">Load Audit Logs</button>
+            </div>
+        </div>
+    `;
+}
+
+async function submitVerification(reportId) {
+    const status = document.getElementById(`action-status-${reportId}`).value;
+    const reviewer = document.getElementById(`action-reviewer-${reportId}`).value;
+    const notes = document.getElementById(`action-notes-${reportId}`).value;
+    const incidentId = document.getElementById(`action-incident-${reportId}`).value;
+
+    if (!reviewer) { showToast('Please enter Reviewer ID', 'error'); return; }
+
+    localStorage.setItem('reviewer_id', reviewer);
+
+    const body = {
+        validation_status: status,
+        reviewer_id: reviewer,
+    };
+    if (notes) body.reviewer_notes = notes;
+    if (incidentId) body.link_to_incident_id = incidentId;
+
+    try {
+        const r = await apiRequest('PATCH', `/reports/${reportId}`, body);
+        if (r.status < 300) {
+            showToast(`Report ${status}: ${reportId}`, 'success');
+            delete reportsCache[reportId];
+            // Refresh the card
+            setTimeout(() => loadReports(), 500);
+        } else {
+            showToast(`Error: ${r.data?.message || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function softDelete(reportId) {
+    if (!confirm(`Soft delete report ${reportId}?`)) return;
+
+    const reviewer = document.getElementById(`action-reviewer-${reportId}`)?.value || 'admin';
+    try {
+        const r = await apiRequest('DELETE', `/reports/${reportId}`, {
+            deleted_by: reviewer,
+            reason: 'Deleted via admin console',
+        });
+        if (r.status < 300) {
+            showToast(`Deleted: ${reportId}`, 'success');
+            delete reportsCache[reportId];
+            setTimeout(() => loadReports(), 500);
+        } else {
+            showToast(`Error: ${r.data?.message || 'Unknown'}`, 'error');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function loadAudit(reportId) {
+    const container = document.getElementById(`audit-${reportId}`);
+    container.innerHTML = '<span>Loading...</span>';
+    try {
+        const r = await apiRequest('GET', `/reports/audit?report_id=${reportId}&limit=10`);
+        if (r.data && r.data.data && r.data.data.length > 0) {
+            container.innerHTML = r.data.data.map(log => `
+                <div style="border-left:3px solid var(--primary);padding:0.4rem 0.75rem;margin-bottom:0.4rem;background:#f8fafc;border-radius:0 6px 6px 0;">
+                    <strong style="color:var(--primary);">${escapeHtml(log.action_type)}</strong>
+                    <span style="float:right;font-size:0.75rem;color:var(--text-light);">${log.timestamp || ''}</span>
+                    <div style="font-size:0.8rem;color:var(--text-light);">
+                        Actor: ${escapeHtml(log.actor_id || 'system')}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<span style="color:var(--text-light);">No audit logs yet</span>';
+        }
+    } catch (e) {
+        container.innerHTML = `<span style="color:var(--danger);">${escapeHtml(e.message)}</span>`;
+    }
+}
+
+// Auto-load on page open if config exists
+if (CONFIG.baseUrl) {
+    loadReports();
+}
+</script>
+
+</body>
+</html>
