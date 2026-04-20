@@ -90,3 +90,11 @@ resource "aws_s3_object" "dashboard_html" {
   content_type = "text/html; charset=utf-8"
   etag         = filemd5("${path.module}/../frontend/dashboard/index.html")
 }
+
+resource "aws_s3_object" "openapi_spec" {
+  bucket       = aws_s3_bucket.website.id
+  key          = "openapi.json"
+  source       = "${path.module}/../docs/openapi/openapi.json"
+  content_type = "application/json; charset=utf-8"
+  etag         = filemd5("${path.module}/../docs/openapi/openapi.json")
+}

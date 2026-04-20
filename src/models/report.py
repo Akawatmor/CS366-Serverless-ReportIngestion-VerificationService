@@ -59,6 +59,7 @@ class Report:
     ai_reasoning: str = ""
     suggested_category: str = ""
     ai_analysis_failed: bool = False
+    priority: int = 0
 
     # Status
     validation_status: str = ValidationStatus.RECEIVED.value
@@ -80,6 +81,7 @@ class Report:
             "trust_score": {"N": str(self.trust_score)},
             "validation_status": {"S": self.validation_status},
             "ai_analysis_failed": {"BOOL": self.ai_analysis_failed},
+            "priority": {"N": str(self.priority)},
         }
         if self.source_external_id:
             item["source_external_id"] = {"S": self.source_external_id}
@@ -134,6 +136,7 @@ class Report:
             ai_reasoning=item.get("ai_reasoning", {}).get("S", ""),
             suggested_category=item.get("suggested_category", {}).get("S", ""),
             ai_analysis_failed=item.get("ai_analysis_failed", {}).get("BOOL", False),
+            priority=int(item.get("priority", {}).get("N", 0)),
             validation_status=item["validation_status"]["S"],
             verified_by=item.get("verified_by", {}).get("S"),
             verification_notes=item.get("verification_notes", {}).get("S"),
@@ -160,6 +163,7 @@ class Report:
             "content": (self.raw_content[:80] + "...") if len(self.raw_content) > 80 else self.raw_content,
             "trust_score": self.trust_score,
             "suggested_category": self.suggested_category,
+            "priority": "HIGH" if self.priority > 0 else "NORMAL",
             "time_ago": time_ago,
         }
 
@@ -185,6 +189,7 @@ class Report:
                 "ai_analysis_failed": self.ai_analysis_failed,
                 "potential_duplicates": self.potential_duplicates,
             },
+            "priority": "HIGH" if self.priority > 0 else "NORMAL",
             "geo_location": self.geo_location.to_dict() if self.geo_location else None,
             "status": self.validation_status,
             "verified_by": self.verified_by,

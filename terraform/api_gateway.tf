@@ -255,6 +255,31 @@ resource "aws_api_gateway_integration" "get_health" {
 }
 
 # ==========================
+# /v1/changelog.xml
+# ==========================
+resource "aws_api_gateway_resource" "changelog_xml" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  parent_id   = aws_api_gateway_resource.v1.id
+  path_part   = "changelog.xml"
+}
+
+resource "aws_api_gateway_method" "get_changelog_xml" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_resource.changelog_xml.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "get_changelog_xml" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_resource.changelog_xml.id
+  http_method             = aws_api_gateway_method.get_changelog_xml.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_handler.invoke_arn
+}
+
+# ==========================
 # CORS — OPTIONS methods
 # ==========================
 module "cors_reports" {
@@ -279,6 +304,12 @@ module "cors_health" {
   source  = "./modules/cors"
   rest_api_id = aws_api_gateway_rest_api.api.id
   resource_id = aws_api_gateway_resource.health.id
+}
+
+module "cors_changelog" {
+  source      = "./modules/cors"
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.changelog_xml.id
 }
 
 module "cors_audit" {
@@ -314,6 +345,7 @@ resource "aws_api_gateway_deployment" "api" {
       aws_api_gateway_resource.reports_upload_url.id,
       aws_api_gateway_resource.report_by_id.id,
       aws_api_gateway_resource.health.id,
+      aws_api_gateway_resource.changelog_xml.id,
       aws_api_gateway_method.post_reports.id,
       aws_api_gateway_method.get_reports.id,
       aws_api_gateway_method.get_stats.id,
@@ -324,6 +356,7 @@ resource "aws_api_gateway_deployment" "api" {
       aws_api_gateway_method.patch_report.id,
       aws_api_gateway_method.delete_report.id,
       aws_api_gateway_method.get_health.id,
+      aws_api_gateway_method.get_changelog_xml.id,
     ]))
   }
 
@@ -338,10 +371,12 @@ resource "aws_api_gateway_deployment" "api" {
     aws_api_gateway_integration.patch_report,
     aws_api_gateway_integration.delete_report,
     aws_api_gateway_integration.get_health,
+    aws_api_gateway_integration.get_changelog_xml,
     module.cors_reports,
     module.cors_report_by_id,
     module.cors_stats,
     module.cors_health,
+    module.cors_changelog,
     module.cors_audit,
     module.cors_events,
     module.cors_upload_url,

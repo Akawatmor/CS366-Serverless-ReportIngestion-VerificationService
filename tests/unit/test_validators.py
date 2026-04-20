@@ -213,6 +213,15 @@ class TestValidateListParams:
         _, errors = validate_list_params({"min_trust_score": "abc"})
         assert len(errors) > 0
 
+    def test_priority_filter_high(self):
+        parsed, errors = validate_list_params({"priority": "high"})
+        assert errors == []
+        assert parsed["priority"] == "high"
+
+    def test_invalid_priority_filter(self):
+        _, errors = validate_list_params({"priority": "urgent"})
+        assert any("priority" in e for e in errors)
+
 
 class TestValidateStatsParams:
     """Tests for GET /reports/stats query parameters."""
@@ -230,3 +239,12 @@ class TestValidateStatsParams:
     def test_invalid_timeframe(self):
         _, errors = validate_stats_params({"timeframe": "last_year"})
         assert len(errors) > 0
+
+    def test_valid_region_filter(self):
+        parsed, errors = validate_stats_params({"region": "bkk"})
+        assert errors == []
+        assert parsed["region"] == "bkk"
+
+    def test_invalid_region_filter(self):
+        _, errors = validate_stats_params({"region": "mars"})
+        assert any("region" in e for e in errors)

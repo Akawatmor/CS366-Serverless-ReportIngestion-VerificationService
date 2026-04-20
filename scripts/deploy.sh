@@ -72,6 +72,7 @@ pip install \
     --python-version 3.12 \
     --only-binary=:all: \
     --upgrade \
+    --ignore-installed \
     -r "$PROJECT_ROOT/requirements.txt" \
     2>&1 | tail -5
 

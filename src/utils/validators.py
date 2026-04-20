@@ -14,6 +14,9 @@ from src.models.enums import (
 from src.config import config
 
 
+SUPPORTED_STATS_REGIONS = {"bkk", "central", "north", "northeast", "south"}
+
+
 # ---------------------------------------------------------------------------
 # Ingest (POST /reports) validation
 # ---------------------------------------------------------------------------
@@ -201,6 +204,14 @@ def validate_list_params(params: dict[str, str]) -> tuple[dict[str, Any], list[s
     else:
         parsed["limit"] = config.DEFAULT_PAGE_LIMIT
 
+    # priority filter
+    priority = (params.get("priority") or "all").lower().strip()
+    allowed_priorities = {"all", "high", "normal"}
+    if priority not in allowed_priorities:
+        errors.append(f"priority must be one of: {sorted(allowed_priorities)}")
+    else:
+        parsed["priority"] = priority
+
     return parsed, errors
 
 
@@ -218,7 +229,11 @@ def validate_stats_params(params: dict[str, str]) -> tuple[dict[str, Any], list[
 
     region = params.get("region")
     if region:
-        parsed["region"] = region
+        normalized = region.lower().strip()
+        if normalized not in SUPPORTED_STATS_REGIONS:
+            errors.append(f"region must be one of: {sorted(SUPPORTED_STATS_REGIONS)}")
+        else:
+            parsed["region"] = normalized
 
     return parsed, errors
 

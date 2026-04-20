@@ -13,7 +13,9 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
+from html import escape as xml_escape
 from typing import Any
 
 import boto3
@@ -23,6 +25,7 @@ from src.models.report import Report
 from src.models.enums import ValidationStatus, VerificationAction
 from src.services.audit_service import AuditService
 from src.services.event_publisher import EventPublisher
+from src.services.geocoding_service import reverse_geocoding_service
 from src.utils.logger import get_logger
 from src.utils import response
 from src.utils.validators import (
@@ -34,6 +37,70 @@ from src.utils.validators import (
 )
 
 logger = get_logger(__name__)
+
+
+REGION_BOUNDARIES: dict[str, dict[str, tuple[float, float] | str]] = {
+    "bkk": {
+        "label": "Bangkok",
+        "lat": (13.45, 13.95),
+        "lon": (100.30, 100.95),
+    },
+    "central": {
+        "label": "Central",
+        "lat": (13.00, 16.50),
+        "lon": (99.00, 101.80),
+    },
+    "north": {
+        "label": "North",
+        "lat": (17.00, 20.50),
+        "lon": (97.00, 101.50),
+    },
+    "northeast": {
+        "label": "Northeast",
+        "lat": (14.00, 18.50),
+        "lon": (101.00, 105.80),
+    },
+    "south": {
+        "label": "South",
+        "lat": (6.00, 13.00),
+        "lon": (98.00, 101.50),
+    },
+}
+
+_STATS_CACHE: dict[str, dict[str, Any]] = {}
+
+CHANGELOG_ENTRIES: list[dict[str, str]] = [
+    {
+        "id": "2026-04-19-openapi-rss",
+        "title": "Added OpenAPI specification and RSS changelog endpoint",
+        "description": (
+            "Published OpenAPI 3.0 spec for API consumers and added "
+            "GET /v1/changelog.xml feed for machine-readable change tracking."
+        ),
+        "version": "1.1.0",
+        "published_at": "2026-04-19T10:00:00+00:00",
+    },
+    {
+        "id": "2026-04-08-observability",
+        "title": "Improved response observability",
+        "description": (
+            "Added X-Trace-Id header and standardized error responses with "
+            "traceId, errorCode, and timestamp fields."
+        ),
+        "version": "1.0.2",
+        "published_at": "2026-04-08T09:00:00+00:00",
+    },
+    {
+        "id": "2026-04-08-contract-versioning",
+        "title": "Added schemaVersion to async events",
+        "description": (
+            "EventBridge payloads now include schemaVersion to support safer "
+            "contract evolution for downstream consumers."
+        ),
+        "version": "1.0.1",
+        "published_at": "2026-04-08T08:30:00+00:00",
+    },
+]
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +143,9 @@ def handler(event: dict, context) -> dict:
 
         elif method == "GET" and "/events" in path:
             result = _handle_get_events(query_params, dynamodb, request_id)
+
+        elif method == "GET" and "changelog.xml" in path:
+            result = _handle_changelog_rss(event, request_id)
 
         elif method == "POST" and "/upload-url" in path:
             body = _parse_body(event, request_id)
@@ -135,6 +205,8 @@ def _handle_list_reports(query_params: dict, dynamodb, trace_id: str | None = No
     status = parsed.get("status", ValidationStatus.PENDING_REVIEW.value)
     limit = parsed.get("limit", config.DEFAULT_PAGE_LIMIT)
     min_score = parsed.get("min_trust_score")
+    priority_filter = parsed.get("priority", "all")
+    query_fetch_limit = min(max(limit * 4, limit), config.MAX_PAGE_LIMIT)
 
     try:
         expr_values: dict[str, Any] = {
@@ -152,7 +224,7 @@ def _handle_list_reports(query_params: dict, dynamodb, trace_id: str | None = No
             "KeyConditionExpression": "validation_status = :status",
             "ExpressionAttributeValues": expr_values,
             "ScanIndexForward": False,  # newest first
-            "Limit": limit,
+            "Limit": query_fetch_limit,
         }
         if filter_expr is not None:
             query_kwargs["FilterExpression"] = filter_expr
@@ -160,11 +232,19 @@ def _handle_list_reports(query_params: dict, dynamodb, trace_id: str | None = No
         resp = dynamodb.query(**query_kwargs)
 
         items = resp.get("Items", [])
-        reports = [Report.from_dynamodb_item(item).to_api_summary() for item in items]
+        reports_all = [Report.from_dynamodb_item(item) for item in items]
+
+        if priority_filter == "high":
+            reports_all = [r for r in reports_all if r.priority > 0]
+        elif priority_filter == "normal":
+            reports_all = [r for r in reports_all if r.priority <= 0]
+
+        reports_all.sort(key=lambda r: (r.priority, r.ingested_at), reverse=True)
+        reports = [r.to_api_summary() for r in reports_all[:limit]]
 
         return response.success({
             "data": reports,
-            "total_count": resp.get("Count", 0),
+            "total_count": len(reports_all),
         }, trace_id=trace_id)
 
     except Exception as e:
@@ -313,14 +393,21 @@ def _handle_verify(report_id: str, body: dict, dynamodb, trace_id: str | None = 
     # If VERIFIED → also publish ReportVerifiedEvent for Incident Service
     if new_status == ValidationStatus.VERIFIED.value:
         report = Report.from_dynamodb_item(item)
+        severity_level = _calculate_severity_level(report)
+        reporter_count = _calculate_reporter_count(dynamodb, report)
+        address_text = _resolve_address_text(report)
+
         incident_data = {
             "type": report.suggested_category or "OTHER",
             "description": report.raw_content[:500],
-            "severity_level": 3,  # TODO: compute from AI tags
+            "severity_level": severity_level,
             "location": report.geo_location.to_dict() if report.geo_location else None,
-            "reporter_count": 1,
+            "reporter_count": reporter_count,
             "media_evidence": report.media_urls,
         }
+        if address_text:
+            incident_data["address_text"] = address_text
+
         event_pub.publish_report_verified(
             report_id=report_id,
             suggested_incident_data=incident_data,
@@ -408,52 +495,44 @@ def _handle_delete(report_id: str, body: dict, dynamodb, trace_id: str | None = 
 # ---------------------------------------------------------------------------
 
 def _handle_get_stats(query_params: dict, dynamodb, trace_id: str | None = None) -> dict:
-    """Get aggregated dashboard statistics from the StatsCounter table."""
+    """Get aggregated dashboard statistics with timeframe + region filtering."""
     parsed, errors = validate_stats_params(query_params)
     if errors:
         return response.bad_request("Invalid parameters.", "; ".join(errors), trace_id=trace_id)
 
     timeframe = parsed.get("timeframe", "today")
+    region = parsed.get("region")
+    cache_key = f"{timeframe}|{region or 'all'}"
+
+    now_ts = time.time()
+    cached = _STATS_CACHE.get(cache_key)
+    if cached and cached.get("expires_at", 0) > now_ts:
+        return response.success(cached["payload"], trace_id=trace_id)
 
     try:
-        # Determine date prefix for stats lookup
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-        stat_keys = [
-            f"{today}#total_received",
-            f"{today}#pending_review",
-            f"{today}#verified_incidents",
-            f"{today}#spam_rejected",
-            f"{today}#duplicates",
-        ]
-
-        # Batch get stats
-        keys = [{"stat_key": {"S": k}} for k in stat_keys]
-        resp = dynamodb.batch_get_item(
-            RequestItems={
-                config.STATS_TABLE: {
-                    "Keys": keys,
-                    "ProjectionExpression": "stat_key, stat_value",
-                },
-            },
+        report_items = _collect_reports_for_stats(
+            dynamodb=dynamodb,
+            timeframe=timeframe,
+            region=region,
         )
+        summary = _summarize_report_items(report_items)
 
-        stats_map: dict[str, int] = {}
-        for item in resp.get("Responses", {}).get(config.STATS_TABLE, []):
-            key = item["stat_key"]["S"].split("#", 1)[-1]
-            stats_map[key] = int(item.get("stat_value", {}).get("N", 0))
-
-        return response.success({
+        payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "summary": {
-                "total_received_today": stats_map.get("total_received", 0),
-                "pending_review": stats_map.get("pending_review", 0),
-                "verified_incidents": stats_map.get("verified_incidents", 0),
-                "spam_rejected": stats_map.get("spam_rejected", 0),
-            },
-            "trending_keywords": _compute_trending_keywords(dynamodb),
-            "heatmap_data": [],       # TODO: implement from geo_location aggregation
-        }, trace_id=trace_id)
+            "timeframe": timeframe,
+            "region": region,
+            "supported_regions": sorted(REGION_BOUNDARIES.keys()),
+            "summary": summary,
+            "trending_keywords": _compute_trending_keywords(report_items),
+            "heatmap_data": _compute_heatmap_data(report_items),
+        }
+
+        _STATS_CACHE[cache_key] = {
+            "payload": payload,
+            "expires_at": now_ts + config.STATS_CACHE_TTL_SECONDS,
+        }
+
+        return response.success(payload, trace_id=trace_id)
 
     except Exception as e:
         logger.error(f"Error getting stats: {e}", exc_info=True)
@@ -589,6 +668,7 @@ def _handle_upload_url(body: dict, trace_id: str | None = None) -> dict:
     filename = body.get("filename", "")
     content_type = body.get("content_type", "application/octet-stream")
     report_id = body.get("report_id", "")
+    file_size = body.get("file_size_bytes")
 
     if not filename:
         return response.bad_request("filename is required.", trace_id=trace_id)
@@ -608,10 +688,26 @@ def _handle_upload_url(body: dict, trace_id: str | None = None) -> dict:
             trace_id=trace_id,
         )
 
+    if file_size is not None:
+        try:
+            file_size_int = int(file_size)
+        except (TypeError, ValueError):
+            return response.bad_request("file_size_bytes must be an integer.", trace_id=trace_id)
+
+        if file_size_int <= 0:
+            return response.bad_request("file_size_bytes must be greater than 0.", trace_id=trace_id)
+
+        if file_size_int > config.UPLOAD_MAX_FILE_BYTES:
+            return response.bad_request(
+                f"file_size_bytes exceeds max limit of {config.UPLOAD_MAX_FILE_BYTES} bytes.",
+                trace_id=trace_id,
+            )
+
     # Build S3 key: media/{report_id_or_temp}/{uuid}_{filename}
     prefix = report_id if report_id else "temp"
     safe_filename = filename.replace(" ", "_").replace("/", "_")
-    s3_key = f"media/{prefix}/{uuid.uuid4().hex[:8]}_{safe_filename}"
+    media_id = f"m-{uuid.uuid4().hex[:12]}"
+    s3_key = f"media/{prefix}/{media_id}_{safe_filename}"
 
     try:
         s3_client = boto3.client("s3", region_name=config.AWS_REGION)
@@ -632,11 +728,13 @@ def _handle_upload_url(body: dict, trace_id: str | None = None) -> dict:
 
         return response.success({
             "upload_url": presigned_url,
+            "media_id": media_id,
             "media_url": media_url,
             "s3_key": s3_key,
             "expires_in": 900,
             "method": "PUT",
             "content_type": content_type,
+            "max_file_size_bytes": config.UPLOAD_MAX_FILE_BYTES,
             "instructions": (
                 "1. PUT the file body to upload_url with Content-Type header. "
                 "2. Include media_url in POST /reports media_urls array."
@@ -652,71 +750,162 @@ def _handle_upload_url(body: dict, trace_id: str | None = None) -> dict:
 # Trending Keywords computation
 # ---------------------------------------------------------------------------
 
-def _compute_trending_keywords(dynamodb) -> list[dict]:
-    """Compute trending keywords from recent reports' AI analysis tags."""
-    try:
-        # Query recent PENDING_REVIEW + VERIFIED reports for their tags
+def _collect_reports_for_stats(dynamodb, timeframe: str, region: str | None) -> list[dict]:
+    """Collect report items for stats/trending/heatmap calculations."""
+    cutoff_iso = _timeframe_cutoff(timeframe).isoformat()
+    statuses = [
+        ValidationStatus.RECEIVED.value,
+        ValidationStatus.PENDING_REVIEW.value,
+        ValidationStatus.VERIFIED.value,
+        ValidationStatus.SPAM.value,
+        ValidationStatus.REJECTED.value,
+        ValidationStatus.DUPLICATE.value,
+    ]
+
+    projection = (
+        "report_id, validation_status, ai_analysis_tags, suggested_category, "
+        "geo_location, ingested_at"
+    )
+    report_items: list[dict] = []
+
+    for status in statuses:
         resp = dynamodb.query(
             TableName=config.REPORTS_TABLE,
             IndexName="gsi_status_ingested",
-            KeyConditionExpression="validation_status = :status",
-            ExpressionAttributeValues={":status": {"S": "PENDING_REVIEW"}},
-            ProjectionExpression="ai_analysis_tags, suggested_category",
+            KeyConditionExpression="validation_status = :status AND ingested_at >= :cutoff",
+            ExpressionAttributeValues={
+                ":status": {"S": status},
+                ":cutoff": {"S": cutoff_iso},
+            },
+            ProjectionExpression=projection,
             ScanIndexForward=False,
-            Limit=50,
+            Limit=config.STATS_REPORT_SCAN_LIMIT,
         )
-
-        # Count keyword frequency
-        keyword_counts: dict[str, int] = {}
-        category_counts: dict[str, int] = {}
 
         for item in resp.get("Items", []):
-            tags = [t["S"] for t in item.get("ai_analysis_tags", {}).get("L", [])]
-            for tag in tags:
-                tag_lower = tag.lower().strip()
-                if tag_lower and len(tag_lower) > 1:
-                    keyword_counts[tag_lower] = keyword_counts.get(tag_lower, 0) + 1
+            if region:
+                geo = _parse_geo_from_item(item)
+                if not geo or not _coordinates_in_region(geo[0], geo[1], region):
+                    continue
+            report_items.append(item)
 
-            cat = item.get("suggested_category", {}).get("S", "")
-            if cat:
-                category_counts[cat] = category_counts.get(cat, 0) + 1
-
-        # Also check VERIFIED reports
-        resp2 = dynamodb.query(
-            TableName=config.REPORTS_TABLE,
-            IndexName="gsi_status_ingested",
-            KeyConditionExpression="validation_status = :status",
-            ExpressionAttributeValues={":status": {"S": "VERIFIED"}},
-            ProjectionExpression="ai_analysis_tags, suggested_category",
-            ScanIndexForward=False,
-            Limit=50,
-        )
-
-        for item in resp2.get("Items", []):
-            tags = [t["S"] for t in item.get("ai_analysis_tags", {}).get("L", [])]
-            for tag in tags:
-                tag_lower = tag.lower().strip()
-                if tag_lower and len(tag_lower) > 1:
-                    keyword_counts[tag_lower] = keyword_counts.get(tag_lower, 0) + 1
-
-            cat = item.get("suggested_category", {}).get("S", "")
-            if cat:
-                category_counts[cat] = category_counts.get(cat, 0) + 1
-
-        # Sort by frequency, top 10
-        trending = sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-
-        return [
-            {"keyword": kw, "count": count, "category": _guess_category(kw, category_counts)}
-            for kw, count in trending
-        ]
-
-    except Exception as e:
-        logger.warning(f"Could not compute trending keywords: {e}")
-        return []
+    return report_items
 
 
-def _guess_category(keyword: str, category_counts: dict) -> str:
+def _timeframe_cutoff(timeframe: str) -> datetime:
+    now = datetime.now(timezone.utc)
+    if timeframe == "last_24h":
+        return now - timedelta(hours=24)
+    if timeframe == "last_7d":
+        return now - timedelta(days=7)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _summarize_report_items(report_items: list[dict]) -> dict[str, int]:
+    pending_review = 0
+    verified_incidents = 0
+    spam_rejected = 0
+
+    for item in report_items:
+        status = item.get("validation_status", {}).get("S", "")
+        if status == ValidationStatus.PENDING_REVIEW.value:
+            pending_review += 1
+        elif status == ValidationStatus.VERIFIED.value:
+            verified_incidents += 1
+        elif status in (ValidationStatus.SPAM.value, ValidationStatus.REJECTED.value):
+            spam_rejected += 1
+
+    return {
+        "total_received_today": len(report_items),
+        "pending_review": pending_review,
+        "verified_incidents": verified_incidents,
+        "spam_rejected": spam_rejected,
+    }
+
+
+def _compute_trending_keywords(report_items: list[dict]) -> list[dict]:
+    """Compute trending keywords from report ai_analysis_tags."""
+    keyword_counts: dict[str, int] = {}
+    category_counts: dict[str, int] = {}
+
+    for item in report_items:
+        tags = [t["S"] for t in item.get("ai_analysis_tags", {}).get("L", [])]
+        for tag in tags:
+            tag_lower = tag.lower().strip()
+            if tag_lower and len(tag_lower) > 1:
+                keyword_counts[tag_lower] = keyword_counts.get(tag_lower, 0) + 1
+
+        cat = item.get("suggested_category", {}).get("S", "")
+        if cat:
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+
+    trending = sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    return [
+        {"keyword": kw, "count": count, "category": _guess_category(kw, category_counts)}
+        for kw, count in trending
+    ]
+
+
+def _compute_heatmap_data(report_items: list[dict]) -> list[dict]:
+    """Aggregate report coordinates into simple geo buckets for dashboard heatmaps."""
+    heatmap: dict[tuple[float, float], int] = {}
+
+    for item in report_items:
+        geo = _parse_geo_from_item(item)
+        if not geo:
+            continue
+
+        lat, lon = geo
+        # Bucket to ~1.1km cells for lightweight rendering.
+        bucket_key = (round(lat, 2), round(lon, 2))
+        heatmap[bucket_key] = heatmap.get(bucket_key, 0) + 1
+
+    points = []
+    for (lat, lon), count in heatmap.items():
+        region = _resolve_region_for_point(lat, lon)
+        points.append({
+            "lat": lat,
+            "lon": lon,
+            "count": count,
+            "region": region,
+        })
+
+    points.sort(key=lambda p: p["count"], reverse=True)
+    return points[:50]
+
+
+def _parse_geo_from_item(item: dict) -> tuple[float, float] | None:
+    """Read lat/lon from a DynamoDB report item."""
+    try:
+        geo_m = item.get("geo_location", {}).get("M")
+        if not geo_m:
+            return None
+        lat = float(geo_m["lat"]["N"])
+        lon = float(geo_m["lon"]["N"])
+        return lat, lon
+    except Exception:
+        return None
+
+
+def _coordinates_in_region(lat: float, lon: float, region: str) -> bool:
+    bounds = REGION_BOUNDARIES.get(region)
+    if not bounds:
+        return False
+
+    lat_min, lat_max = bounds["lat"]
+    lon_min, lon_max = bounds["lon"]
+    return lat_min <= lat <= lat_max and lon_min <= lon <= lon_max
+
+
+def _resolve_region_for_point(lat: float, lon: float) -> str | None:
+    for region_key in sorted(REGION_BOUNDARIES.keys()):
+        if _coordinates_in_region(lat, lon, region_key):
+            return region_key
+    return None
+
+
+def _guess_category(keyword: str, category_counts: dict[str, int]) -> str:
     """Guess the disaster category for a keyword based on common patterns."""
     kw = keyword.lower()
     category_map = {
@@ -728,9 +917,166 @@ def _guess_category(keyword: str, category_counts: dict) -> str:
     return category_map.get(kw, max(category_counts, key=category_counts.get) if category_counts else "OTHER")
 
 
+def _calculate_severity_level(report: Report) -> int:
+    """Derive severity level (1-5) from category/tags/content signals."""
+    category = (report.suggested_category or "").upper()
+    tags_text = " ".join(report.ai_analysis_tags).lower()
+    content_text = (report.raw_content or "").lower()
+    combined = f"{tags_text} {content_text}"
+
+    level = 1
+    if category in {"FIRE", "FLOOD", "EARTHQUAKE", "SOS", "DAMAGE"}:
+        level = max(level, 3)
+    elif category == "ACCIDENT":
+        level = max(level, 2)
+
+    emergency_keywords = [
+        "mass casualty", "many injured", "multiple dead", "ระเบิด", "ถล่มทั้งอาคาร",
+    ]
+    critical_keywords = [
+        "trapped", "can't breathe", "help", "ติดอยู่", "หายใจไม่ออก", "ช่วยด้วย",
+        "severe burn", "collapsed", "major fire",
+    ]
+    high_keywords = [
+        "fire", "flood", "earthquake", "evacuation", "ไฟไหม้", "น้ำท่วม", "แผ่นดินไหว",
+        "rescue", "injured", "อพยพ", "บาดเจ็บ",
+    ]
+
+    if any(k in combined for k in high_keywords):
+        level = max(level, 3)
+    if any(k in combined for k in critical_keywords):
+        level = max(level, 4)
+    if any(k in combined for k in emergency_keywords):
+        level = max(level, 5)
+
+    if report.trust_score >= 90 and level < 3:
+        level = 3
+
+    return max(1, min(level, 5))
+
+
+def _calculate_reporter_count(dynamodb, report: Report) -> int:
+    """Count unique reporters from current report and its potential duplicates."""
+    reporter_ids: set[str] = set()
+    if report.reporter_id:
+        reporter_ids.add(report.reporter_id)
+
+    duplicate_ids = report.potential_duplicates[:50]
+    if not duplicate_ids:
+        return max(1, len(reporter_ids))
+
+    try:
+        keys = [{"report_id": {"S": rid}} for rid in duplicate_ids]
+        resp = dynamodb.batch_get_item(
+            RequestItems={
+                config.REPORTS_TABLE: {
+                    "Keys": keys,
+                    "ProjectionExpression": "report_id, reporter_id",
+                },
+            }
+        )
+        for item in resp.get("Responses", {}).get(config.REPORTS_TABLE, []):
+            reporter_id = item.get("reporter_id", {}).get("S")
+            if reporter_id:
+                reporter_ids.add(reporter_id)
+    except Exception as e:
+        logger.warning(f"Could not calculate reporter_count from duplicates: {e}")
+
+    return max(1, len(reporter_ids))
+
+
+def _resolve_address_text(report: Report) -> str | None:
+    """Resolve user-friendly address text from report coordinates."""
+    if not report.geo_location:
+        return None
+
+    lat = report.geo_location.lat
+    lon = report.geo_location.lon
+
+    address = reverse_geocoding_service.reverse_geocode(lat, lon)
+    region_key = _resolve_region_for_point(lat, lon)
+    if region_key:
+        region_label = str(REGION_BOUNDARIES[region_key]["label"])
+        if address and region_label.lower() not in address.lower():
+            return f"{address} ({region_label})"
+        if address:
+            return address
+        return f"{region_label} (lat={lat:.5f}, lon={lon:.5f})"
+
+    return address
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _resolve_api_base_url(event: dict) -> str:
+    """Resolve API base URL from API Gateway event metadata."""
+    headers = event.get("headers") or {}
+    host = headers.get("Host") or headers.get("host")
+    request_ctx = event.get("requestContext") or {}
+    stage = request_ctx.get("stage")
+
+    if host and stage:
+        return f"https://{host}/{stage}/v1"
+    return ""
+
+
+def _format_rss_pub_date(timestamp_iso: str) -> str:
+    """Convert ISO timestamp to RFC-2822 date for RSS pubDate."""
+    try:
+        return format_datetime(datetime.fromisoformat(timestamp_iso))
+    except Exception:
+        return format_datetime(datetime.now(timezone.utc))
+
+
+def _build_changelog_rss_xml(api_base_url: str) -> str:
+    """Build RSS 2.0 XML from static changelog entries."""
+    feed_self_link = f"{api_base_url}/changelog.xml" if api_base_url else ""
+    docs_link = f"{api_base_url}/openapi.json" if api_base_url else ""
+    channel_pub_date = _format_rss_pub_date(datetime.now(timezone.utc).isoformat())
+
+    item_xml_parts: list[str] = []
+    for entry in CHANGELOG_ENTRIES:
+        entry_link = (
+            f"{api_base_url}/changelog.xml#{xml_escape(entry['id'])}"
+            if api_base_url else f"#{xml_escape(entry['id'])}"
+        )
+        item_xml_parts.append(
+            "\n".join([
+                "    <item>",
+                f"      <title>{xml_escape(entry['title'])}</title>",
+                f"      <description>{xml_escape(entry['description'])}</description>",
+                f"      <link>{entry_link}</link>",
+                f"      <guid isPermaLink=\"false\">{xml_escape(entry['id'])}</guid>",
+                f"      <pubDate>{_format_rss_pub_date(entry['published_at'])}</pubDate>",
+                f"      <category>version:{xml_escape(entry['version'])}</category>",
+                "    </item>",
+            ])
+        )
+
+    return "\n".join([
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+        "<rss version=\"2.0\">",
+        "  <channel>",
+        "    <title>Report Verify Service Changelog</title>",
+        "    <description>Release and contract changes for API consumers</description>",
+        f"    <link>{xml_escape(api_base_url) if api_base_url else ''}</link>",
+        f"    <lastBuildDate>{channel_pub_date}</lastBuildDate>",
+        "    <ttl>60</ttl>",
+        f"    <docs>{xml_escape(docs_link)}</docs>",
+        f"    <atom:link href=\"{xml_escape(feed_self_link)}\" rel=\"self\" type=\"application/rss+xml\" xmlns:atom=\"http://www.w3.org/2005/Atom\"/>",
+        *item_xml_parts,
+        "  </channel>",
+        "</rss>",
+    ])
+
+
+def _handle_changelog_rss(event: dict, trace_id: str | None = None) -> dict:
+    """Return changelog feed as RSS XML."""
+    api_base_url = _resolve_api_base_url(event)
+    xml_body = _build_changelog_rss_xml(api_base_url)
+    return response.xml(xml_body, trace_id=trace_id)
 
 def _parse_body(event: dict, trace_id: str | None = None) -> dict:
     """Parse JSON body from API Gateway event."""

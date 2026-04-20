@@ -81,6 +81,26 @@ class Config:
     # Deduplication
     DEDUP_RADIUS_METERS: int = int(os.environ.get("DEDUP_RADIUS_METERS", "200"))
     DEDUP_TIME_WINDOW_MINUTES: int = int(os.environ.get("DEDUP_TIME_WINDOW_MINUTES", "15"))
+    CONTENT_SIMILARITY_THRESHOLD: float = float(
+        os.environ.get("CONTENT_SIMILARITY_THRESHOLD", "0.65")
+    )
+
+    # Upload
+    UPLOAD_MAX_FILE_BYTES: int = int(os.environ.get("UPLOAD_MAX_FILE_BYTES", "20971520"))
+
+    # Stats
+    STATS_REPORT_SCAN_LIMIT: int = int(os.environ.get("STATS_REPORT_SCAN_LIMIT", "300"))
+    STATS_CACHE_TTL_SECONDS: int = int(os.environ.get("STATS_CACHE_TTL_SECONDS", "60"))
+
+    # Reverse geocoding
+    REVERSE_GEOCODING_ENABLED: bool = os.environ.get(
+        "REVERSE_GEOCODING_ENABLED", "true"
+    ).lower() in ("1", "true", "yes", "y")
+    GEOCODING_PROVIDER: str = os.environ.get("GEOCODING_PROVIDER", "nominatim")
+    GEOCODING_TIMEOUT_SECONDS: int = int(os.environ.get("GEOCODING_TIMEOUT_SECONDS", "2"))
+    GEOCODING_USER_AGENT: str = os.environ.get(
+        "GEOCODING_USER_AGENT", "cs366-report-verify-service/1.0"
+    )
 
     # API
     DEFAULT_PAGE_LIMIT: int = 5

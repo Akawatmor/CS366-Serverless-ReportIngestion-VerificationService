@@ -117,9 +117,17 @@ def _process_single_report(
             event_time=body.get("timestamp"),
         )
 
+    # Add text similarity dedup even when geo is missing/noisy.
+    similar_by_content = dedup_svc.find_content_similar_reports(
+        raw_content=body.get("raw_content", ""),
+        event_time=body.get("timestamp"),
+    )
+    potential_duplicates = list(dict.fromkeys(potential_duplicates + similar_by_content))
+
     # --- 4. Determine initial status ---
     trust_score = ai_result["trust_score"]
     initial_status = _determine_status(trust_score, ai_result, potential_duplicates, body)
+    priority = _determine_priority(trust_score, body.get("raw_content", ""), ai_result)
 
     # --- 5. Build Report object ---
     geo_location = None
@@ -141,6 +149,7 @@ def _process_single_report(
         ai_reasoning=ai_result.get("reasoning", ""),
         suggested_category=ai_result.get("suggested_category", "OTHER"),
         ai_analysis_failed=ai_result.get("ai_analysis_failed", False),
+        priority=priority,
         validation_status=initial_status,
         potential_duplicates=potential_duplicates,
     )
@@ -216,6 +225,22 @@ def _determine_status(
         return ValidationStatus.DUPLICATE.value
 
     return ValidationStatus.PENDING_REVIEW.value
+
+
+def _determine_priority(trust_score: int, raw_content: str, ai_result: dict) -> int:
+    """Return 1 for high-priority reports, otherwise 0."""
+    if trust_score >= config.TRUST_HIGH_PRIORITY:
+        return 1
+
+    tags = " ".join(ai_result.get("keywords", []))
+    if _has_severity_keywords(raw_content) or _has_severity_keywords(tags):
+        return 1
+
+    category = (ai_result.get("suggested_category") or "").upper()
+    if category in {"FIRE", "FLOOD", "EARTHQUAKE", "SOS"} and trust_score >= 60:
+        return 1
+
+    return 0
 
 
 def _has_severity_keywords(content: str) -> bool:

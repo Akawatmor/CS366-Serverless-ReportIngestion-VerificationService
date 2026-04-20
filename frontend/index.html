@@ -198,6 +198,7 @@
         </div>
         <div class="hero-actions">
             <a href="/dashboard/" class="btn btn-primary">&#9881; Dashboard & API Tester</a>
+            <a href="/openapi.json" target="_blank" class="btn btn-outline">&#128214; OpenAPI Spec</a>
             <a href="https://github.com/Akawatmor/CS366-Serverless-ReportIngestion-VerificationService" target="_blank" class="btn btn-outline">&#128279; GitHub Repository</a>
         </div>
     </div>
@@ -307,6 +308,12 @@
                     <td><span class="method-badge method-GET">GET</span></td>
                     <td><code>/health</code></td>
                     <td>Health check (DynamoDB, SQS, Gemini, EventBridge)</td>
+                    <td>Public</td>
+                </tr>
+                <tr>
+                    <td><span class="method-badge method-GET">GET</span></td>
+                    <td><code>/changelog.xml</code></td>
+                    <td>RSS feed for release notes and API contract changes</td>
                     <td>Public</td>
                 </tr>
             </tbody>

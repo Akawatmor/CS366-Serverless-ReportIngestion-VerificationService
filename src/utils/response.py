@@ -43,6 +43,32 @@ def success(body: Any, status_code: int = 200, trace_id: str | None = None) -> d
     }
 
 
+def raw(
+    body: str,
+    status_code: int = 200,
+    content_type: str = "text/plain; charset=utf-8",
+    trace_id: str | None = None,
+) -> dict:
+    """Return a raw (non-JSON) API Gateway response."""
+    headers = _build_headers(trace_id)
+    headers["Content-Type"] = content_type
+    return {
+        "statusCode": status_code,
+        "headers": headers,
+        "body": body,
+    }
+
+
+def xml(body: str, status_code: int = 200, trace_id: str | None = None) -> dict:
+    """Return an XML API Gateway response."""
+    return raw(
+        body=body,
+        status_code=status_code,
+        content_type="application/rss+xml; charset=utf-8",
+        trace_id=trace_id,
+    )
+
+
 def accepted(body: Any, trace_id: str | None = None) -> dict:
     """202 Accepted — used for async ingestion."""
     return success(body, status_code=202, trace_id=trace_id)
