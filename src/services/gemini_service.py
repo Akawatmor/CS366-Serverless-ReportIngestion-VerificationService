@@ -25,7 +25,8 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Prompt template for Gemini (text-only)
-ANALYSIS_PROMPT = """You are a disaster report verification AI. Analyze the following raw disaster report and provide a trust assessment.
+# Gemini evaluates ONLY content quality (0-30). Trust score is assembled in Python.
+ANALYSIS_PROMPT = """You are a disaster report verification AI. Evaluate the CONTENT QUALITY of this report.
 
 **Report Content:**
 {content}
@@ -37,29 +38,39 @@ ANALYSIS_PROMPT = """You are a disaster report verification AI. Analyze the foll
 
 **Attached Media URLs:** {media_urls}
 
-**Reporter History:**
+**Reporter History (context only — do NOT factor into content_score):**
 {reporter_history}
 
-**Instructions:**
-1. Evaluate the credibility of this report on a scale of 0-100 (trust_score).
-   - Consider the reporter's past history: repeated spam submissions lower trust; a track record of verified reports increases trust.
-   - If media evidence URLs are attached, acknowledge their presence (higher trust if photos/video are included).
-2. Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
-3. Extract important keywords (Thai or English).
-4. Provide a brief reasoning for your trust score, including how reporter history and media affected your decision.
-5. Detect if this looks like spam, fake news, or a duplicate pattern. Consider repeat offenders.
+**Your task — score ONLY the content quality on a scale of 0–30:**
+
+| Criterion | Points |
+|---|---|
+| Specifies exact location (street name / neighbourhood / coordinates) | +10 |
+| Specifies time or timeline of the event | +8 |
+| Describes damage or number of people affected | +7 |
+| Uses factual language (not panic-driven / exaggerated) | +5 |
+
+Do NOT award points for: reporter history, media attachments, or source platform — those are scored separately by the system.
+
+**Also:**
+- Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
+- Extract important keywords (Thai or English).
+- List any spam signals detected (repetitive phrasing, vague location, exaggerated claims, etc.).
+- Decide if this looks like spam or fake news.
 
 **Respond ONLY with valid JSON in this exact format:**
 {{
-  "trust_score": <int 0-100>,
+  "content_score": <int 0-30>,
+  "content_score_reasoning": "<brief explanation of points awarded>",
   "suggested_category": "<string>",
   "keywords": ["<string>", ...],
-  "reasoning": "<string>",
+  "spam_signals": ["<string>", ...],
   "is_spam_likely": <boolean>
 }}"""
 
 # Prompt template for Gemini Vision (with images)
-VISION_ANALYSIS_PROMPT = """You are a disaster report verification AI with image analysis capability. Analyze the following disaster report including the attached image(s).
+# Gemini evaluates content quality (0-30) + image evidence (int). Python assembles the final score.
+VISION_ANALYSIS_PROMPT = """You are a disaster report verification AI with image analysis capability.
 
 **Report Content:**
 {content}
@@ -69,30 +80,45 @@ VISION_ANALYSIS_PROMPT = """You are a disaster report verification AI with image
 **Location (lat, lon):** {lat}, {lon}
 **Reported Time:** {timestamp}
 
-**Reporter History:**
+**Reporter History (context only — do NOT factor into content_score):**
 {reporter_history}
 
-**Instructions:**
-1. Carefully examine the attached image(s) for signs of:
-   - Real disaster damage (fire, flood, structural damage, etc.)
-   - Manipulation or editing artifacts
-   - Stock photos or internet-sourced images
-   - Consistency with the text description
-2. Evaluate the credibility of this report on a scale of 0-100 (trust_score).
-   - Images showing real damage: +20-30 points
-   - Images that look fake/manipulated: -30-50 points
-   - Images inconsistent with description: -20 points
-3. Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
-4. Extract important keywords (Thai or English).
-5. Describe what you see in the image(s) and how it affects your trust assessment.
-6. Detect if this looks like spam, fake news, or a duplicate pattern.
+**Task 1 — Score content quality (0–30):**
+
+| Criterion | Points |
+|---|---|
+| Specifies exact location (street name / neighbourhood / coordinates) | +10 |
+| Specifies time or timeline of the event | +8 |
+| Describes damage or number of people affected | +7 |
+| Uses factual language (not panic-driven / exaggerated) | +5 |
+
+**Task 2 — Analyse image(s) and return image_score:**
+Examine each image for authenticity and consistency with the text.
+
+| Finding | image_score |
+|---|---|
+| Image shows real disaster damage consistent with report | +20 |
+| Image shows real damage but only partially matches report | +10 |
+| Image is unrelated or unclear but not suspicious | 0 |
+| Image appears manipulated / edited | -10 |
+| Image is a stock photo or clearly sourced from the internet | -10 |
+
+Return a single integer for image_score reflecting your overall judgement.
+
+**Also:**
+- Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
+- Extract important keywords (Thai or English).
+- List any spam signals detected.
+- Decide if this looks like spam or fake news.
 
 **Respond ONLY with valid JSON in this exact format:**
 {{
-  "trust_score": <int 0-100>,
+  "content_score": <int 0-30>,
+  "content_score_reasoning": "<brief explanation of points awarded>",
+  "image_score": <int>,
   "suggested_category": "<string>",
   "keywords": ["<string>", ...],
-  "reasoning": "<string>",
+  "spam_signals": ["<string>", ...],
   "image_analysis": "<description of what you see in the image(s)>",
   "image_authenticity": "<real|likely_fake|uncertain>",
   "is_spam_likely": <boolean>
@@ -504,10 +530,12 @@ class GeminiService:
             result = json.loads(response_text)
             duration_ms = int((time.time() - start_time) * 1000)
 
+            content_score = int(result.get("content_score", 15))
+
             logger.info(
                 "Gemini analysis completed",
                 extra={"data": {
-                    "trust_score": result.get("trust_score"),
+                    "content_score": content_score,
                     "category": result.get("suggested_category"),
                     "duration_ms": duration_ms,
                     "model_used": self._current_model,
@@ -516,12 +544,13 @@ class GeminiService:
                 }},
             )
 
-            # Build response with optional Vision fields
+            # Build response — trust_score is assembled by compute_trust_score() in Python
             response = {
-                "trust_score": int(result.get("trust_score", 50)),
+                "content_score": content_score,
+                "content_score_reasoning": result.get("content_score_reasoning", ""),
                 "suggested_category": result.get("suggested_category", "OTHER"),
                 "keywords": result.get("keywords", []),
-                "reasoning": result.get("reasoning", ""),
+                "spam_signals": result.get("spam_signals", []),
                 "is_spam_likely": result.get("is_spam_likely", False),
                 "ai_analysis_failed": False,
                 "vision_used": use_vision,
@@ -529,6 +558,7 @@ class GeminiService:
 
             # Include Vision-specific fields if present
             if use_vision:
+                response["image_score"] = int(result.get("image_score", 0))
                 response["image_analysis"] = result.get("image_analysis", "")
                 response["image_authenticity"] = result.get("image_authenticity", "uncertain")
 
@@ -544,46 +574,43 @@ class GeminiService:
 
     @staticmethod
     def _fallback_result() -> dict[str, Any]:
-        """Default result when AI is unavailable — trust_score = 50 (neutral)."""
+        """Default result when AI is unavailable — neutral content_score."""
         return {
-            "trust_score": 50,
+            "content_score": 15,  # neutral mid-point (0-30)
+            "content_score_reasoning": "AI analysis unavailable — manual review required.",
             "suggested_category": "OTHER",
             "keywords": [],
-            "reasoning": "AI analysis unavailable — manual review required.",
+            "spam_signals": [],
             "is_spam_likely": False,
             "ai_analysis_failed": True,
         }
 
     def health_check(self) -> dict[str, Any]:
-        """Lightweight connectivity check for /health endpoint."""
-        if not self._api_keys and not config.GEMINI_API_KEY:
+        """Lightweight connectivity check via List Models API (no generation quota used)."""
+        import urllib.request
+        import urllib.error
+
+        api_key = self._current_key if self._api_keys else config.GEMINI_API_KEY
+        if not api_key:
             return {"status": "degraded", "error": "No API keys configured"}
 
+        model_name = self._model_chain[0] if self._model_chain else config.GEMINI_MODEL
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=1"
         try:
-            api_key = self._current_key
-            model_name = self._model_chain[0] if self._model_chain else config.GEMINI_MODEL
-            client = self._get_client(api_key, model_name)
-            response = client.generate_content(
-                "Reply with exactly: OK",
-                generation_config={"max_output_tokens": 10},
-                request_options={
-                    "timeout": config.GEMINI_TIMEOUT,
-                },
-            )
+            req = urllib.request.Request(url, headers={"User-Agent": "health-check/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                resp.read()
             return {
                 "status": "healthy",
                 "model": model_name,
                 "available_keys": len(self._api_keys),
                 "model_chain": self._model_chain,
             }
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                return {"status": "degraded", "error": f"API key invalid (HTTP {e.code})", "available_keys": len(self._api_keys)}
+            return {"status": "unhealthy", "error": f"HTTP {e.code}"}
         except Exception as e:
-            if self._is_rate_limited(e) or self._is_model_not_found(e):
-                return {
-                    "status": "degraded",
-                    "error": str(e)[:100],
-                    "available_keys": len(self._api_keys),
-                    "model_chain": self._model_chain,
-                }
             return {"status": "unhealthy", "error": str(e)[:100]}
 
 

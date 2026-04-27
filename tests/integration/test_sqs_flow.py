@@ -118,14 +118,17 @@ class TestSQSFlow:
     @patch("src.handlers.ingestion_worker.gemini_service")
     def test_worker_processes_message(self, mock_gemini, aws_environment, sample_sqs_message):
         """Worker should process SQS message and write to DynamoDB."""
-        # Mock Gemini response
+        # Mock Gemini response — content_score only (0-30)
+        # Expected final trust_score: 25(content) + 8(TWITTER) + 10(history) + 8(media) + 10(geo) = 61
         mock_gemini.analyze_report.return_value = {
-            "trust_score": 85,
+            "content_score": 25,
+            "content_score_reasoning": "Street name and smoke mentioned",
             "suggested_category": "FIRE",
             "keywords": ["fire", "smoke"],
-            "reasoning": "Fire detected in content",
+            "spam_signals": [],
             "is_spam_likely": False,
             "ai_analysis_failed": False,
+            "vision_used": False,
         }
 
         # Build SQS event format
@@ -159,26 +162,34 @@ class TestSQSFlow:
         )
         assert "Item" in resp
         item = resp["Item"]
-        assert item["trust_score"]["N"] == "85"
+        assert item["trust_score"]["N"] == "61"  # 25+8+10+8+10 = 61
         assert item["validation_status"]["S"] == "PENDING_REVIEW"
 
     @patch("src.handlers.ingestion_worker.gemini_service")
     def test_worker_auto_rejects_spam(self, mock_gemini, aws_environment, sample_sqs_message):
-        """Low trust score should auto-mark as SPAM."""
+        """Low content_score + no geo/media should produce trust_score < 30 → SPAM."""
+        # content_score=0 + TWITTER(8) + history(10) + no_media(0) + no_geo(0) = 18 < 30
         mock_gemini.analyze_report.return_value = {
-            "trust_score": 10,
+            "content_score": 0,
+            "content_score_reasoning": "No location, vague, repetitive",
             "suggested_category": "OTHER",
             "keywords": [],
-            "reasoning": "Spam detected",
+            "spam_signals": ["no_location", "vague"],
             "is_spam_likely": True,
             "ai_analysis_failed": False,
+            "vision_used": False,
         }
+
+        # Use a minimal body without geo or media to keep score below threshold
+        spam_body = dict(sample_sqs_message)
+        spam_body["media_urls"] = []
+        spam_body["geo_location"] = None
 
         sqs_event = {
             "Records": [
                 {
                     "messageId": "msg-spam",
-                    "body": json.dumps(sample_sqs_message),
+                    "body": json.dumps(spam_body),
                 }
             ]
         }
@@ -197,6 +208,6 @@ class TestSQSFlow:
 
         resp = aws_environment["dynamodb"].get_item(
             TableName=config.REPORTS_TABLE,
-            Key={"report_id": {"S": sample_sqs_message["report_id"]}},
+            Key={"report_id": {"S": spam_body["report_id"]}},
         )
         assert resp["Item"]["validation_status"]["S"] == "SPAM"

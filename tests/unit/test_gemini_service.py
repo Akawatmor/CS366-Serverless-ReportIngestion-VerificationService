@@ -27,22 +27,23 @@ class TestGeminiService:
     def test_fallback_result_structure(self):
         """Fallback result should have all required fields."""
         result = GeminiService._fallback_result()
-        assert result["trust_score"] == 50
+        assert result["content_score"] == 15
         assert result["suggested_category"] == "OTHER"
         assert isinstance(result["keywords"], list)
         assert result["ai_analysis_failed"] is True
         assert result["is_spam_likely"] is False
-        assert "reasoning" in result
+        assert "content_score_reasoning" in result
 
     @patch("src.services.gemini_service.genai", create=True)
     def test_analyze_report_success(self, mock_genai):
         """Successful Gemini analysis should return parsed JSON."""
         mock_response = MagicMock()
         mock_response.text = json.dumps({
-            "trust_score": 85,
+            "content_score": 25,
+            "content_score_reasoning": "Street name and timeline present",
             "suggested_category": "FIRE",
             "keywords": ["fire", "smoke", "urgent"],
-            "reasoning": "Multiple indicators of fire detected",
+            "spam_signals": [],
             "is_spam_likely": False,
         })
 
@@ -57,7 +58,7 @@ class TestGeminiService:
             timestamp="2026-02-18T14:30:00Z",
         )
 
-        assert result["trust_score"] == 85
+        assert result["content_score"] == 25
         assert result["suggested_category"] == "FIRE"
         assert "fire" in result["keywords"]
         assert result["ai_analysis_failed"] is False
@@ -70,7 +71,7 @@ class TestGeminiService:
 
         result = self.service.analyze_report(content="Test content")
 
-        assert result["trust_score"] == 50
+        assert result["content_score"] == 15
         assert result["ai_analysis_failed"] is True
 
     def test_analyze_report_invalid_json_returns_fallback(self):
@@ -79,7 +80,7 @@ class TestGeminiService:
 
         result = self.service.analyze_report(content="Test content")
 
-        assert result["trust_score"] == 50
+        assert result["content_score"] == 15
         assert result["ai_analysis_failed"] is True
 
     def test_health_check_success(self):
@@ -162,4 +163,4 @@ class TestGeminiService:
             mock_config.GEMINI_API_KEY = ""
             result = self.service.analyze_report(content="test")
         assert result["ai_analysis_failed"] is True
-        assert result["trust_score"] == 50
+        assert result["content_score"] == 15

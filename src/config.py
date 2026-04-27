@@ -78,6 +78,23 @@ class Config:
     TRUST_AUTO_REJECT: int = int(os.environ.get("TRUST_AUTO_REJECT", "30"))
     TRUST_HIGH_PRIORITY: int = int(os.environ.get("TRUST_HIGH_PRIORITY", "80"))
 
+    # Component Scoring — Source Platform (deterministic, used in compute_trust_score)
+    SOURCE_SCORES: dict = {
+        "IOT_SENSOR": 20,
+        "OFFICIAL_APP": 18,
+        "LINE": 12,
+        "FACEBOOK": 12,
+        "TWITTER": 8,
+    }
+    SOURCE_SCORE_DEFAULT: int = 0
+
+    # Reporter History scoring (Component 3, computed in Python)
+    HISTORY_BASE_SCORE: int = 10            # first-time reporter (no history)
+    HISTORY_VERIFIED_BONUS: int = 5         # +5 bonus if ≥3 verified reports
+    HISTORY_SPAM_PENALTY: int = 8           # -8 per spam record (min 0)
+    HISTORY_RATE_LIMIT_WINDOW_MINUTES: int = 10
+    HISTORY_RATE_LIMIT_THRESHOLD: int = 3   # ≥3 reports in window → force SPAM
+
     # Deduplication
     DEDUP_RADIUS_METERS: int = int(os.environ.get("DEDUP_RADIUS_METERS", "200"))
     DEDUP_TIME_WINDOW_MINUTES: int = int(os.environ.get("DEDUP_TIME_WINDOW_MINUTES", "15"))

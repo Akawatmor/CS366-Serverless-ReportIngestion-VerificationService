@@ -51,11 +51,61 @@ curl -s -X POST "$API_URL/reports" \
   -H "x-api-key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "reporter_source": "citizen_app",
+    "reporter_source": "OFFICIAL_APP",
     "reporter_id": "demo-user-001",
     "raw_content": "ไฟไหม้ตลาดสดเยาวราช ควันดำเยอะมาก",
     "geo_location": { "lat": 13.7410, "lon": 100.5130 },
     "timestamp": "2026-04-20T10:00:00+07:00"
+  }' | python3 -m json.tool
+```
+
+**ตัวอย่างจาก source อื่น ๆ:**
+
+```bash
+# จาก IOT Sensor (เซนเซอร์น้ำท่วม)
+curl -s -X POST "$API_URL/reports" \
+  -H "x-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reporter_source": "IOT_SENSOR",
+    "reporter_id": "sensor-flood-bkk-001",
+    "raw_content": "Water level exceeded threshold: 35cm. Alert triggered.",
+    "geo_location": { "lat": 13.7200, "lon": 100.5850 }
+  }' | python3 -m json.tool
+
+# จาก Twitter
+curl -s -X POST "$API_URL/reports" \
+  -H "x-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reporter_source": "TWITTER",
+    "reporter_id": "@emergency_bkk",
+    "source_external_id": "tweet-1234567890",
+    "raw_content": "#BKKFire ไฟไหม้ร้านทอง เยาวราช ตอนนี้เลย! ควันดำลอยมาเห็นจากไกล",
+    "geo_location": { "lat": 13.7466, "lon": 100.5391 }
+  }' | python3 -m json.tool
+
+# จาก LINE
+curl -s -X POST "$API_URL/reports" \
+  -H "x-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reporter_source": "LINE",
+    "reporter_id": "U1234567890abcdef",
+    "raw_content": "แผ่นดินไหวที่เชียงใหม่ รู้สึกชัด ๆ",
+    "geo_location": { "lat": 18.7883, "lon": 98.9853 }
+  }' | python3 -m json.tool
+
+# จาก Facebook
+curl -s -X POST "$API_URL/reports" \
+  -H "x-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reporter_source": "FACEBOOK",
+    "reporter_id": "fb_user_12345",
+    "source_external_id": "post_98765432",
+    "raw_content": "พายุถล่มหนัก ต้นไม้ล้มขวางถนน สุขุมวิท 63",
+    "geo_location": { "lat": 13.7308, "lon": 100.5827 }
   }' | python3 -m json.tool
 ```
 
@@ -65,7 +115,7 @@ export REPORT_ID=$(curl -s -X POST "$API_URL/reports" \
   -H "x-api-key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "reporter_source": "citizen_app",
+    "reporter_source": "OFFICIAL_APP",
     "reporter_id": "demo-user-002",
     "raw_content": "น้ำท่วมซอยสุขุมวิท 71 สูงประมาณ 30 ซม.",
     "geo_location": { "lat": 13.7200, "lon": 100.5850 },
@@ -113,7 +163,7 @@ curl -s -X POST "$API_URL/reports" \
   -H "x-api-key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d "{
-    \"reporter_source\": \"citizen_app\",
+    \"reporter_source\": \"OFFICIAL_APP\",
     \"reporter_id\": \"demo-user-003\",
     \"raw_content\": \"ไฟไหม้บ้าน มีภาพหลักฐาน\",
     \"geo_location\": { \"lat\": 13.7466, \"lon\": 100.5391 },
@@ -160,12 +210,13 @@ curl -s "$API_URL/reports/$REPORT_ID" | python3 -m json.tool
 ```
 
 **สิ่งที่ควรดู:**
-- `validation_status` — สถานะปัจจุบัน (RECEIVED → PENDING_REVIEW หลัง AI วิเคราะห์เสร็จ)
-- `trust_score` — คะแนนจาก Gemini AI (0-100)
-- `ai_reasoning` — เหตุผลจาก AI
-- `suggested_category` — ประเภทเหตุการณ์ (FIRE, FLOOD, etc.)
-- `ai_analysis_tags` — tags จาก AI
-- `traceId` — ใช้ trace ใน CloudWatch
+- `status` — สถานะปัจจุบัน (RECEIVED → PENDING_REVIEW หลัง AI วิเคราะห์เสร็จ)
+- `analysis.trust_score` — คะแนนจาก Gemini AI (0-100)
+- `analysis.ai_reasoning` — เหตุผลจาก AI
+- `analysis.suggested_category` — ประเภทเหตุการณ์ (FIRE, FLOOD, etc.)
+- `analysis.ai_analysis_tags` — tags จาก AI
+- `analysis.potential_duplicates` — report ID ของรายงานที่อาจซ้ำกัน
+- `priority` — ระดับความสำคัญ (HIGH, NORMAL)
 
 ---
 
@@ -353,7 +404,7 @@ REPORT_ID=$(curl -s -X POST "$API_URL/reports" \
   -H "x-api-key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "reporter_source": "citizen_app",
+    "reporter_source": "OFFICIAL_APP",
     "reporter_id": "demo-presenter",
     "raw_content": "ไฟไหม้อาคารพาณิชย์ ซอยเจริญกรุง ควันดำหนาแน่น",
     "geo_location": { "lat": 13.7280, "lon": 100.5140 }
@@ -388,8 +439,11 @@ curl -s "$API_URL/reports/audit?report_id=$REPORT_ID&limit=5" | python3 -m json.
 # 9. ดู stats
 curl -s "$API_URL/reports/stats?timeframe=today&region=bkk" | python3 -m json.tool
 
-# 10. Trace request
-TRACE_ID=$(curl -s "$API_URL/reports/$REPORT_ID" | python3 -c "import json,sys; print(json.load(sys.stdin).get('traceId',''))")
+# 10. Trace request (ใช้ traceId จาก PATCH response)
+TRACE_ID=$(curl -s -X PATCH "$API_URL/reports/$REPORT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"validation_status":"VERIFIED","reviewer_id":"demo-officer"}' \
+  | python3 -c "import json,sys; print(json.load(sys.stdin).get('traceId',''))")
 curl -s "$API_URL/reports/trace/$TRACE_ID" | python3 -m json.tool
 ```
 
@@ -437,7 +491,8 @@ curl -s -X PATCH "$API_URL/reports/$REPORT_ID" \
 |--------|------------|
 | **API Key** | ต้องใช้เฉพาะ POST /reports และ POST /reports/upload-url |
 | **X-Trace-Id** | ทุก response มี header นี้ ใช้ trace ใน CloudWatch |
-| **traceId** | ทุก JSON response มี field นี้ (เหมือน X-Trace-Id) |
+| **traceId** | Error responses, PATCH, health endpoint มี field นี้ (เหมือน X-Trace-Id) |
+| **reporter_source** | ต้องเป็น OFFICIAL_APP, TWITTER, FACEBOOK, LINE, หรือ IOT_SENSOR เท่านั้น |
 | **errorCode** | ทุก error response มี E400, E401, E403, E404, E409, E429, E500 |
 | **AI Processing** | async ผ่าน SQS, ใช้เวลา ~5-15 วินาทีหลัง POST |
 | **Dedup** | Worker ตรวจ report ซ้ำใกล้เคียง (radius 200m, time window 15 นาที) |

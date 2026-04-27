@@ -199,6 +199,13 @@ def handler(event: dict, context) -> dict:
             else:
                 result = _handle_delete(path_params["report_id"], body, dynamodb, request_id)
 
+        elif method == "POST" and "report-incident" in path:
+            body = _parse_body(event, request_id)
+            if isinstance(body, dict) and "error" in body:
+                result = body
+            else:
+                result = _handle_incident_result(body, dynamodb, request_id)
+
         elif method == "OPTIONS":
             result = response.success({"message": "CORS preflight OK"}, trace_id=request_id)
 
@@ -515,6 +522,171 @@ def _handle_delete(report_id: str, body: dict, dynamodb, trace_id: str | None = 
         "report_id": report_id,
         "status": "DELETED",
         "message": "Report has been archived and removed from public view.",
+    }, trace_id=trace_id)
+
+
+# ---------------------------------------------------------------------------
+# POST /report-incident — Receive IncidentCreationResultEvent from Incident Service
+# ---------------------------------------------------------------------------
+
+def _handle_incident_result(body: dict, dynamodb, trace_id: str | None = None) -> dict:
+    """
+    Callback from Incident Tracking Service after it processes a ReportVerifiedEvent.
+
+    Accepts both ``original_report_ref_id`` (preferred) and ``source_report_id``
+    (fallback) to identify the originating report — whichever is present is used.
+
+    On CREATED: auto-populate linked_incident_id on the report in DynamoDB and
+                record full incident metadata in the audit log.
+    On FAILED:  write an audit log entry so the failure is traceable.
+    """
+    logger.info(
+        "report-incident callback received",
+        extra={"request_id": trace_id, "data": {"body_keys": list(body.keys()), "body": body}},
+    )
+
+    # --- Unwrap event envelope format (eventType + data) if present ---
+    # Supports both flat body and envelope: { eventType, data: { ... } }
+    event_type = body.get("eventType", "")
+    if event_type and isinstance(body.get("data"), dict):
+        payload = body["data"]
+        # Map eventType to status
+        if event_type in ("INCIDENT_CREATED", "INCIDENT_UPDATED"):
+            payload.setdefault("status", "CREATED")
+        elif event_type in ("INCIDENT_FAILED", "INCIDENT_ERROR"):
+            payload.setdefault("status", "FAILED")
+    else:
+        payload = body
+
+    # --- Resolve report reference (own field takes priority, then friend's field) ---
+    # Accept: original_report_ref_id (ours) > source_report_id > report_id (common alias)
+    report_ref_id = (
+        payload.get("original_report_ref_id")
+        or payload.get("source_report_id")
+        or payload.get("report_id")
+        or ""
+    ).strip()
+
+    status = payload.get("status", "").strip()
+    incident_id = payload.get("incident_id", "").strip()
+    error_code = payload.get("error_code", "")
+    error_message = payload.get("error_message", "")
+
+    # Additional fields sent by the Incident Tracking Service on creation
+    incident_type = payload.get("incident_type") or payload.get("indident_type") or ""
+    incident_description = payload.get("incident_description", "")
+    exact_location = payload.get("exact_location", "")
+    exact_location_description = payload.get("exact_location_description", "")
+    impact_level = payload.get("impact_level", "")
+    priority = payload.get("priority", "")
+
+    # Normalise status aliases: REPORTED / ACTIVE → CREATED
+    if status in ("REPORTED", "ACTIVE", "OPEN"):
+        status = "CREATED"
+
+    if not report_ref_id:
+        # This incident was not triggered by our service — gracefully ignore it
+        logger.info(
+            "report-incident callback ignored (no report ref_id)",
+            extra={"request_id": trace_id, "data": {"event_type": event_type}},
+        )
+        return response.success({
+            "acknowledged": True,
+            "message": "Event acknowledged — no linked report, skipped.",
+        }, trace_id=trace_id)
+    if status not in ("CREATED", "FAILED"):
+        return response.bad_request(
+            "Validation failed.", "status must be CREATED or FAILED.", trace_id=trace_id
+        )
+    if status == "CREATED" and not incident_id:
+        return response.bad_request(
+            "Validation failed.", "incident_id is required when status is CREATED.", trace_id=trace_id
+        )
+
+    now = datetime.now(timezone.utc).isoformat()
+    audit_svc = AuditService(dynamodb_client=dynamodb)
+
+    if status == "CREATED":
+        # Auto-populate linked_incident_id so GET /reports/{id} shows it immediately
+        try:
+            dynamodb.update_item(
+                TableName=config.REPORTS_TABLE,
+                Key={"report_id": {"S": report_ref_id}},
+                UpdateExpression="SET linked_incident_id = :iid, updated_at = :now",
+                ConditionExpression="attribute_exists(report_id)",
+                ExpressionAttributeValues={
+                    ":iid": {"S": incident_id},
+                    ":now": {"S": now},
+                },
+            )
+            logger.info(
+                "Linked incident to report",
+                extra={"request_id": trace_id, "data": {
+                    "report_id": report_ref_id,
+                    "incident_id": incident_id,
+                }},
+            )
+        except dynamodb.exceptions.ConditionalCheckFailedException:
+            return response.not_found(
+                f"Report '{report_ref_id}' not found.", trace_id=trace_id
+            )
+        except Exception as e:
+            logger.error(f"Error linking incident to report: {e}", exc_info=True)
+            return response.internal_error("Failed to update report.", trace_id=trace_id)
+
+        # Store full incident metadata in the audit log for traceability
+        incident_log_data: dict = {"linked_incident_id": incident_id}
+        if incident_type:
+            incident_log_data["incident_type"] = incident_type
+        if incident_description:
+            incident_log_data["incident_description"] = incident_description
+        if exact_location:
+            incident_log_data["exact_location"] = exact_location
+        if exact_location_description:
+            incident_log_data["exact_location_description"] = exact_location_description
+        if impact_level:
+            incident_log_data["impact_level"] = impact_level
+        if priority:
+            incident_log_data["priority"] = str(priority)
+
+        audit_svc._write_log(
+            report_id=report_ref_id,
+            actor_id="service.incident-tracking",
+            action_type="INCIDENT_LINKED",
+            previous_value={"linked_incident_id": None},
+            new_value=incident_log_data,
+        )
+
+        return response.success({
+            "report_id": report_ref_id,
+            "linked_incident_id": incident_id,
+            "message": "Report successfully linked to incident.",
+        }, trace_id=trace_id)
+
+    # status == "FAILED"
+    audit_svc._write_log(
+        report_id=report_ref_id,
+        actor_id="service.incident-tracking",
+        action_type="INCIDENT_LINK_FAILED",
+        previous_value=None,
+        new_value={
+            "error_code": error_code,
+            "error_message": error_message,
+        },
+    )
+    logger.warning(
+        "Incident creation failed for report",
+        extra={"request_id": trace_id, "data": {
+            "report_id": report_ref_id,
+            "error_code": error_code,
+            "error_message": error_message,
+        }},
+    )
+
+    return response.success({
+        "report_id": report_ref_id,
+        "acknowledged": True,
+        "message": "Failure notification recorded.",
     }, trace_id=trace_id)
 
 

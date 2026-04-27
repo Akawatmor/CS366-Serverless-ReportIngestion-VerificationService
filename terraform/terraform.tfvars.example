@@ -1,13 +1,16 @@
 # === Example terraform.tfvars ===
 # Copy to terraform.tfvars and fill in values
+# OR use deploy.sh which auto-generates this from .env
 
 project_name    = "report-verify"
 environment     = "dev"
 aws_region      = "us-east-1"
 
-# Gemini AI — get from Google AI Studio
-gemini_api_key  = "YOUR_GEMINI_API_KEY_HERE"
-gemini_model    = "gemini-2.0-flash"
+# Gemini AI — comma-separated list of API keys (get from Google AI Studio)
+# Supports multiple keys for rotation: "key1,key2,key3"
+gemini_api_keys = "YOUR_GEMINI_API_KEY_HERE"
+gemini_model    = "gemini-2.5-flash-lite"
+gemini_model_fallbacks = "gemini-2.5-flash-lite,gemini-2.0-flash,gemini-3.1-flash-lite"
 
 # Lambda config
 lambda_memory_size    = 256
