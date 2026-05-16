@@ -2,12 +2,12 @@
 Gemini AI Service — calls Google Gemini API for Trust Scoring.
 
 Features:
-  - Multi API key rotation: cycles through GEMINI_API_KEY1..10
-    When a key gets 429 (rate limited), automatically rotates to the next key.
-  - Model fallback chain: tries gemini-2.5-flash-lite first, then
-    gemini-2.0-flash, then gemini-3.1-flash-lite.
-  - Graceful degradation: if all keys/models fail, returns fallback values.
-  - Vision support: can analyze images from S3 URLs.
+    - Multi API key rotation: cycles through GEMINI_API_KEY1..10
+        When a key gets 429 (rate limited), automatically rotates to the next key.
+    - Model fallback chain: tries the configured model order from GEMINI_MODEL_FALLBACKS
+        or GEMINI_MODEL1..N.
+    - Graceful degradation: if all keys/models fail, returns fallback values.
+    - Vision support: can analyze images from S3 URLs.
 """
 from __future__ import annotations
 
@@ -130,9 +130,9 @@ class GeminiService:
     Client for Google Gemini API — handles trust scoring analysis.
 
     Supports:
-      - Multi-key rotation on 429 errors
-      - Model fallback chain (flash-lite → flash → 3.1-flash-lite)
-      - Vision analysis for images from S3
+    - Multi-key rotation on 429 errors
+    - Ordered model fallback chain from configuration
+    - Vision analysis for images from S3
     """
 
     # Supported image types for vision analysis

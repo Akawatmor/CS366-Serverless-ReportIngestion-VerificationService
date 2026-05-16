@@ -83,25 +83,21 @@ class TestGeminiService:
         assert result["content_score"] == 15
         assert result["ai_analysis_failed"] is True
 
-    def test_health_check_success(self):
+    @patch("urllib.request.urlopen")
+    def test_health_check_success(self, mock_urlopen):
         """Health check returns healthy when API responds."""
-        mock_client = MagicMock()
         mock_response = MagicMock()
-        mock_response.text = "OK"
-        mock_client.generate_content.return_value = mock_response
-        self.service._get_client = MagicMock(return_value=mock_client)
+        mock_response.read.return_value = b'{"models": []}'
+        mock_urlopen.return_value.__enter__.return_value = mock_response
 
         result = self.service.health_check()
         assert result["status"] == "healthy"
         assert "model" in result
         assert "available_keys" in result
 
-    def test_health_check_failure(self):
+    @patch("urllib.request.urlopen", side_effect=Exception("Connection error"))
+    def test_health_check_failure(self, _mock_urlopen):
         """Health check returns unhealthy when API fails."""
-        mock_client = MagicMock()
-        mock_client.generate_content.side_effect = Exception("Connection error")
-        self.service._get_client = MagicMock(return_value=mock_client)
-
         result = self.service.health_check()
         assert result["status"] == "unhealthy"
 

@@ -31,13 +31,13 @@ variable "gemini_api_keys" {
 variable "gemini_model" {
   description = "Default Gemini model"
   type        = string
-  default     = "gemini-2.5-flash-lite"
+  default     = "gemini-3.1-flash-lite"
 }
 
 variable "gemini_model_fallbacks" {
   description = "Comma-separated model fallback chain"
   type        = string
-  default     = "gemini-2.5-flash-lite,gemini-2.0-flash,gemini-3.1-flash-lite"
+  default     = "gemini-3.1-flash-lite,gemini-3-flash-preview,gemma-4-26b-a4b-it,gemini-2.5-flash,gemini-2.5-flash-lite,gemma-4-31b-it"
 }
 
 # --- Lambda ---

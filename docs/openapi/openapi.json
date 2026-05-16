@@ -6,7 +6,7 @@
     "description": "Serverless API for ingesting, verifying, and publishing disaster reports.",
     "contact": {
       "name": "Akawat Moradsatian",
-      "email": "akawat.m@student.chula.ac.th"
+      "email": "akawat.mor@dome.tu.ac.th"
     }
   },
   "servers": [

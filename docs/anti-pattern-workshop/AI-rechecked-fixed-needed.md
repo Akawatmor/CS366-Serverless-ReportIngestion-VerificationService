@@ -325,6 +325,8 @@ These changes are safe and won't break existing consumers:
 For versioning questions or migration support:
 - **Owner**: Akawat Moradsatian
 - **Email**: akawat.m@student.chula.ac.th
+- **Owner**: Akawat Moradsatian
+- **Email**: akawar.mor@dome.tu.ac.th
 - **Slack**: #report-verify-service
 ```
 

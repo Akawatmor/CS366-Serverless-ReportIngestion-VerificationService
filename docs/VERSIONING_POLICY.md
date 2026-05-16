@@ -197,7 +197,7 @@ Staging API: (Contact service owner for URL)
 **Service Owner:**
 - Name: Akawat Moradsatian
 - Student ID: 6609681231
-- Email: akawat.m@student.chula.ac.th
+- Email: akawar.mor@dome.tu.ac.th
 
 **For Versioning Questions:**
 - Slack: #report-verify-service

@@ -64,6 +64,11 @@
             font-size: 0.85rem; font-family: monospace;
         }
         .config-bar input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+        .field-help {
+            font-size: 0.72rem;
+            color: var(--text-light);
+            line-height: 1.45;
+        }
 
         .btn {
             padding: 0.5rem 1rem; border: none; border-radius: 6px;
@@ -87,7 +92,19 @@
             margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;
         }
         .toolbar h2 { font-size: 1.25rem; font-weight: 700; }
-        .filters { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+        .filters { display: flex; gap: 0.75rem; align-items: end; flex-wrap: wrap; }
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+            min-width: 120px;
+        }
+        .filter-group label {
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--text-light);
+            text-transform: uppercase;
+        }
         .filters select, .filters input {
             padding: 0.4rem 0.6rem; border: 1px solid var(--border);
             border-radius: 6px; font-size: 0.85rem;
@@ -265,10 +282,12 @@
         <div class="form-group">
             <label>API Base URL</label>
             <input type="text" id="cfg-url" placeholder="https://xxx.execute-api.us-east-1.amazonaws.com/dev/v1">
+            <div class="field-help">Paste the full API Gateway stage path ending in <code>/v1</code>. Every admin request is sent relative to this URL.</div>
         </div>
         <div class="form-group" style="max-width:250px;">
             <label>API Key</label>
             <input type="password" id="cfg-key" placeholder="Your API Key">
+            <div class="field-help">Required for protected endpoints. Saved locally in this browser so operators do not need to re-paste on each refresh.</div>
         </div>
         <button class="btn btn-primary" onclick="saveConfig()">Save</button>
         <button class="btn btn-primary" onclick="loadReports()">&#8635; Refresh</button>
@@ -286,21 +305,37 @@
     <div class="toolbar">
         <h2>&#128203; Reports Queue</h2>
         <div class="filters">
-            <select id="filter-status" onchange="loadReports()">
-                <option value="PENDING_REVIEW">Pending Review</option>
-                <option value="RECEIVED">Received</option>
-                <option value="VERIFIED">Verified</option>
-                <option value="SPAM">Spam</option>
-                <option value="REJECTED">Rejected</option>
-                <option value="DUPLICATE">Duplicate</option>
-            </select>
-            <select id="filter-priority" onchange="loadReports()">
-                <option value="all">All Priority</option>
-                <option value="high">High Priority</option>
-                <option value="normal">Normal</option>
-            </select>
-            <input type="number" id="filter-min-score" placeholder="Min Score" min="0" max="100" style="width:100px;" onchange="loadReports()">
-            <input type="number" id="filter-limit" value="20" min="1" max="100" style="width:70px;">
+            <div class="filter-group">
+                <label for="filter-status">Status</label>
+                <select id="filter-status" onchange="loadReports()">
+                    <option value="PENDING_REVIEW">Pending Review</option>
+                    <option value="RECEIVED">Received</option>
+                    <option value="VERIFIED">Verified</option>
+                    <option value="SPAM">Spam</option>
+                    <option value="REJECTED">Rejected</option>
+                    <option value="DUPLICATE">Duplicate</option>
+                </select>
+                <div class="field-help">Workflow state to review. This matches the status query sent to <code>GET /reports</code>.</div>
+            </div>
+            <div class="filter-group">
+                <label for="filter-priority">Priority</label>
+                <select id="filter-priority" onchange="loadReports()">
+                    <option value="all">All Priority</option>
+                    <option value="high">High Priority</option>
+                    <option value="normal">Normal</option>
+                </select>
+                <div class="field-help">High priority focuses on the stronger cases first using backend trust thresholds.</div>
+            </div>
+            <div class="filter-group">
+                <label for="filter-min-score">Min Score</label>
+                <input type="number" id="filter-min-score" placeholder="Min Score" min="0" max="100" style="width:100px;" onchange="loadReports()">
+                <div class="field-help">Ignore low-confidence reports when the queue is noisy.</div>
+            </div>
+            <div class="filter-group">
+                <label for="filter-limit">Limit</label>
+                <input type="number" id="filter-limit" value="20" min="1" max="100" style="width:70px;">
+                <div class="field-help">Page size per request. Lower values are easier to review manually.</div>
+            </div>
         </div>
     </div>
 
@@ -548,6 +583,7 @@ function renderDetail(report, container, reportId) {
         <!-- Action Panel -->
         <div class="action-panel">
             <h4>&#9889; Verification Action</h4>
+            <p class="field-help" style="margin-bottom:0.75rem;">Every submission writes an audit entry. <strong>VERIFIED</strong> is the path that typically promotes the report into incident-handling workflows.</p>
             <div class="action-row">
                 <div class="form-group">
                     <label>Decision</label>
@@ -557,20 +593,24 @@ function renderDetail(report, container, reportId) {
                         <option value="SPAM">&#128683; Mark as SPAM</option>
                         <option value="DUPLICATE">&#128257; Mark as DUPLICATE</option>
                     </select>
+                    <div class="field-help">Choose the operational outcome for this report. Non-verified states keep the record but stop escalation.</div>
                 </div>
                 <div class="form-group">
                     <label>Reviewer ID</label>
                     <input type="text" id="action-reviewer-${reportId}" value="${localStorage.getItem('reviewer_id') || 'officer_001'}" placeholder="officer_001">
+                    <div class="field-help">Officer or analyst identifier stored in the audit trail for accountability.</div>
                 </div>
                 <div class="form-group" style="flex:2;">
                     <label>Notes</label>
                     <input type="text" id="action-notes-${reportId}" placeholder="Confirmed via CCTV / False alarm / etc.">
+                    <div class="field-help">Short human explanation that helps later reviewers understand why the decision was made.</div>
                 </div>
             </div>
             <div class="action-row" style="margin-top:0.5rem;">
                 <div class="form-group">
                     <label>Link to Existing Incident (optional)</label>
                     <input type="text" id="action-incident-${reportId}" placeholder="inc-xxx (merge into existing)">
+                    <div class="field-help">Use this when the report belongs to an incident that already exists, so operators can merge instead of opening a new one.</div>
                 </div>
             </div>
             <div class="action-buttons">

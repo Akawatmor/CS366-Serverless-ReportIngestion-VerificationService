@@ -458,14 +458,17 @@
                 <div class="form-group">
                     <label class="form-label">API Base URL (e.g. https://xxx.execute-api.us-east-1.amazonaws.com/dev/v1)</label>
                     <input type="text" class="form-input" id="cfg-url" placeholder="https://abc123.execute-api.us-east-1.amazonaws.com/dev/v1">
+                    <div class="form-hint">Paste the full API Gateway stage URL ending in <code>/v1</code>. This becomes the prefix for every request on this page.</div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">API Key (X-Api-Key)</label>
                     <input type="password" class="form-input" id="cfg-key" placeholder="Your API Key from terraform output">
+                    <div class="form-hint">Required for protected endpoints. The value is stored only in this browser via localStorage.</div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">OpenAPI Spec URL</label>
                     <input type="text" class="form-input" id="cfg-spec-url" placeholder="/openapi.json">
+                    <div class="form-hint">Use <code>/openapi.json</code> for the S3 site, or an absolute URL if the spec is hosted somewhere else.</div>
                 </div>
                 <button class="btn-save" onclick="saveConfig()">Save</button>
             </div>
@@ -544,34 +547,42 @@
                             <option value="OFFICIAL_APP">OFFICIAL_APP</option>
                             <option value="IOT_SENSOR">IOT_SENSOR</option>
                         </select>
+                        <div class="form-hint">Used in deterministic scoring so official apps and sensors can be weighted differently from social posts.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Reporter ID</label>
                         <input type="text" class="form-input-sm" id="ingest-reporter" placeholder="@user123" value="@test_user">
+                        <div class="form-hint">Stable account or device identifier used for reporter history, rate limiting, and audit traceability.</div>
                     </div>
                     <div class="field-full">
                         <label class="form-label-sm">Raw Content</label>
                         <textarea class="form-input-sm" id="ingest-content" rows="3" placeholder="Disaster report text...">ไฟไหม้ร้านทอง เยาวราช ตอนนี้เลย! ควันดำลอยมาเห็นจากไกล #BKKFire</textarea>
+                        <div class="form-hint">Primary report text sent to the backend and AI analysis. Include enough detail for location, timing, and impact.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Latitude</label>
                         <input type="number" class="form-input-sm" id="ingest-lat" step="any" value="13.746123" placeholder="13.746">
+                        <div class="form-hint">Decimal degrees for deduplication, map lookup, and incident clustering.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Longitude</label>
                         <input type="number" class="form-input-sm" id="ingest-lon" step="any" value="100.539123" placeholder="100.539">
+                        <div class="form-hint">Keep this paired with latitude from the same source so location-based matching stays accurate.</div>
                     </div>
                     <div class="field-full">
                         <label class="form-label-sm">Media URLs (comma-separated)</label>
                         <input type="text" class="form-input-sm" id="ingest-media" placeholder="https://img.host/fire123.jpg, https://video.host/clip.mp4">
+                        <div class="form-hint">Optional evidence links. Public image URLs or S3 image URLs can be used by Gemini vision; videos stay as operator evidence.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Event Timestamp (optional)</label>
                         <input type="datetime-local" class="form-input-sm" id="ingest-timestamp">
+                        <div class="form-hint">When the incident happened, not when you submit the form. Helps timeline reasoning and later correlation.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Source External ID (optional, for idempotency)</label>
                         <input type="text" class="form-input-sm" id="ingest-extid" placeholder="tweet-123456789">
+                        <div class="form-hint">Original post or message identifier. Reusing the same value helps prevent duplicate ingestion during retries.</div>
                     </div>
                 </div>
             </div>
@@ -613,18 +624,22 @@
                             <option value="REJECTED">REJECTED</option>
                             <option value="DUPLICATE">DUPLICATE</option>
                         </select>
+                        <div class="form-hint">Primary workflow filter. This maps to the indexed status used by the backend query.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Min Trust Score</label>
                         <input type="number" class="form-input-sm" id="list-score" min="0" max="100" placeholder="0" value="">
+                        <div class="form-hint">Use this to skip low-confidence items when you only want stronger candidates.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Limit</label>
                         <input type="number" class="form-input-sm" id="list-limit" min="1" max="100" value="10">
+                        <div class="form-hint">Number of reports to fetch in one request. Smaller pages are easier during manual review.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Last Evaluated Key (pagination)</label>
                         <input type="text" class="form-input-sm" id="list-next" placeholder="Paste next_token here">
+                        <div class="form-hint">Paste the <code>next_token</code> from the previous response to continue from the next page.</div>
                     </div>
                 </div>
             </div>
@@ -688,6 +703,7 @@
                     <div class="field-full">
                         <label class="form-label-sm">Report ID (UUID)</label>
                         <input type="text" class="form-input-sm" id="verify-id" placeholder="r-550e8400-e29b-41d4-a716-446655440000">
+                        <div class="form-hint">Target report to update. Use the ID from a POST response, list result, or detail page.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">New Status</label>
@@ -697,18 +713,22 @@
                             <option value="REJECTED">REJECTED</option>
                             <option value="DUPLICATE">DUPLICATE</option>
                         </select>
+                        <div class="form-hint">Choose the outcome. <code>VERIFIED</code> can drive downstream incident creation, while other states stop escalation.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Reviewer ID</label>
                         <input type="text" class="form-input-sm" id="verify-reviewer" value="officer_007" placeholder="officer_007">
+                        <div class="form-hint">Operator identifier written into audit logs so each decision is attributable.</div>
                     </div>
                     <div class="field-full">
                         <label class="form-label-sm">Reviewer Notes (optional)</label>
                         <input type="text" class="form-input-sm" id="verify-notes" placeholder="Confirmed via CCTV feed.">
+                        <div class="form-hint">Human reasoning for the decision. Useful when another officer reviews or appeals the case later.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Link to Incident ID (optional, for merge)</label>
                         <input type="text" class="form-input-sm" id="verify-incident" placeholder="inc-1234-5678">
+                        <div class="form-hint">Fill this only when the report should be merged into an already-open incident instead of creating a new one.</div>
                     </div>
                 </div>
             </div>
@@ -741,14 +761,17 @@
                     <div class="field-full">
                         <label class="form-label-sm">Report ID (UUID)</label>
                         <input type="text" class="form-input-sm" id="delete-id" placeholder="r-550e8400-e29b-41d4-a716-446655440000">
+                        <div class="form-hint">The report record to soft delete. The item stays in DynamoDB with a deleted status for traceability.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Reason (Required)</label>
                         <input type="text" class="form-input-sm" id="delete-reason" value="Contains sensitive PII data" placeholder="Reason for deletion">
+                        <div class="form-hint">Mandatory audit context so future reviewers know why the record was hidden from normal workflows.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Deleted By (Required)</label>
                         <input type="text" class="form-input-sm" id="delete-by" value="admin_001" placeholder="admin_001">
+                        <div class="form-hint">Administrative actor recorded in the audit trail for compliance and incident retrospectives.</div>
                     </div>
                 </div>
             </div>
@@ -787,6 +810,7 @@
                             <option value="last_24h">Last 24 Hours</option>
                             <option value="last_7d">Last 7 Days</option>
                         </select>
+                        <div class="form-hint">Controls the aggregation window returned by the stats endpoint.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Region Filter</label>
@@ -798,6 +822,7 @@
                             <option value="northeast">Northeast</option>
                             <option value="south">South</option>
                         </select>
+                        <div class="form-hint">Optional geographic slice when you want operational metrics for a single region only.</div>
                     </div>
                 </div>
             </div>
@@ -855,10 +880,12 @@
             <div class="form-group">
                 <label>Report ID (optional — leave blank for all)</label>
                 <input id="audit-report-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000">
+                <div class="form-hint">Leave empty to scan recent audit entries across the system, or enter one report ID to inspect a single case.</div>
             </div>
             <div class="form-group">
                 <label>Limit</label>
                 <input id="audit-limit" type="number" value="20" min="1" max="100">
+                <div class="form-hint">Maximum number of audit events to load in one request.</div>
             </div>
             <button class="btn" onclick="fetchAuditLogs()">Fetch Audit Logs</button>
         </div>
@@ -892,10 +919,12 @@
                     <option value="verified">ReportVerifiedEvent</option>
                     <option value="status-changed">ReportStatusChangedEvent</option>
                 </select>
+                <div class="form-hint">Filter the EventBridge contract stream to the event family you want to inspect.</div>
             </div>
             <div class="form-group">
                 <label>Limit</label>
                 <input id="events-limit" type="number" value="20" min="1" max="50">
+                <div class="form-hint">Caps the number of recent events returned to keep the page responsive.</div>
             </div>
             <button class="btn" onclick="fetchEvents()">Fetch Events</button>
         </div>
@@ -933,11 +962,13 @@
             <div class="form-group">
                 <label>Report ID (optional — link to existing report)</label>
                 <input id="upload-report-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000">
+                <div class="form-hint">Attach the upload to an existing report if you already know the case ID. Leave blank for a standalone media test.</div>
             </div>
             <div class="form-group">
                 <label>Select File</label>
                 <input type="file" id="upload-file" accept="image/*,video/mp4,video/quicktime,application/pdf"
                        onchange="previewUploadFile()" style="padding:0.5rem;">
+                <div class="form-hint">Images, MP4, MOV, and PDF are supported. The file is uploaded with a presigned S3 URL and returns a media URL.</div>
             </div>
             <div id="upload-preview" style="margin-top:.5rem; display:none;"></div>
             <button class="btn" onclick="uploadMedia()" id="upload-btn" disabled>Upload File</button>

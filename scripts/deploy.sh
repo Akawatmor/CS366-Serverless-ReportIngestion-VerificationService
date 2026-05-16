@@ -50,6 +50,26 @@ else
     echo "[!] No .env file found at $ENV_FILE — using environment variables"
 fi
 
+DEFAULT_GEMINI_MODELS="gemini-3.1-flash-lite,gemini-3-flash-preview,gemma-4-26b-a4b-it,gemini-2.5-flash,gemini-2.5-flash-lite,gemma-4-31b-it"
+
+is_configured_value() {
+    local value="${1:-}"
+    local lowered="${value,,}"
+
+    [[ -n "$value" ]] || return 1
+
+    case "$lowered" in
+        -|placeholder|changeme|replace_me)
+            return 1
+            ;;
+        your_*)
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
 # ----------------------------------------------------------
 # Step 1: Clean build directory
 # ----------------------------------------------------------
@@ -128,13 +148,43 @@ GEMINI_KEYS_CSV=""
 KEY_COUNT=0
 for var_name in $(printenv | grep -oP '^GEMINI_API_KEY\d+' | sort -V); do
     val="${!var_name}"
-    if [[ -n "$val" ]]; then
+    if is_configured_value "$val"; then
         KEY_COUNT=$((KEY_COUNT + 1))
         GEMINI_KEYS_CSV="${GEMINI_KEYS_CSV:+${GEMINI_KEYS_CSV},}${val}"
         echo "  -> Found $var_name"
     fi
 done
 echo "  -> Total Gemini API keys: $KEY_COUNT"
+
+GEMINI_MODELS_CSV=""
+MODEL_COUNT=0
+for var_name in $(printenv | grep -oP '^GEMINI_MODEL\d+' | sort -V); do
+    val="${!var_name}"
+    if is_configured_value "$val"; then
+        MODEL_COUNT=$((MODEL_COUNT + 1))
+        GEMINI_MODELS_CSV="${GEMINI_MODELS_CSV:+${GEMINI_MODELS_CSV},}${val}"
+        echo "  -> Found $var_name = $val"
+    fi
+done
+
+if [[ -z "$GEMINI_MODELS_CSV" ]]; then
+    if is_configured_value "${GEMINI_MODEL_FALLBACKS:-}"; then
+        GEMINI_MODELS_CSV="$GEMINI_MODEL_FALLBACKS"
+    elif is_configured_value "${GEMINI_MODEL:-}"; then
+        GEMINI_MODELS_CSV="$GEMINI_MODEL"
+    else
+        GEMINI_MODELS_CSV="$DEFAULT_GEMINI_MODELS"
+    fi
+fi
+
+PRIMARY_GEMINI_MODEL="${GEMINI_MODEL:-${GEMINI_MODELS_CSV%%,*}}"
+if ! is_configured_value "$PRIMARY_GEMINI_MODEL"; then
+    PRIMARY_GEMINI_MODEL="${GEMINI_MODELS_CSV%%,*}"
+fi
+
+echo "  -> Total Gemini models: $MODEL_COUNT"
+echo "  -> Gemini model chain: $GEMINI_MODELS_CSV"
+echo "  -> Primary Gemini model: $PRIMARY_GEMINI_MODEL"
 
 # Generate terraform.tfvars (overwrite if exists)
 TFVARS_FILE="$TF_DIR/terraform.tfvars"
@@ -148,8 +198,8 @@ aws_region   = "us-east-1"
 
 # Gemini API (multi-key rotation)
 gemini_api_keys = "$GEMINI_KEYS_CSV"
-gemini_model    = "${GEMINI_MODEL:-gemini-2.5-flash-lite}"
-gemini_model_fallbacks = "${GEMINI_MODEL_FALLBACKS:-gemini-2.5-flash-lite,gemini-2.0-flash,gemini-3.1-flash-lite}"
+gemini_model    = "$PRIMARY_GEMINI_MODEL"
+gemini_model_fallbacks = "$GEMINI_MODELS_CSV"
 EOF
 
 echo "  -> Generated: $TFVARS_FILE"
