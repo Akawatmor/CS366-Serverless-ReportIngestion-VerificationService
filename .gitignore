@@ -49,6 +49,7 @@ terraform.tfvars
 *.tfstate
 *.tfstate.backup
 *.tfplan
+**/tfplan
 
 # Test / Coverage
 htmlcov/
