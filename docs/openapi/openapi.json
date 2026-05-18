@@ -301,6 +301,9 @@
           "409": {
             "$ref": "#/components/responses/Error409"
           },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
           "500": {
             "$ref": "#/components/responses/Error500"
           }
@@ -673,6 +676,21 @@
             }
           }
         }
+      },
+      "Error503": {
+        "description": "Upstream dependency unavailable",
+        "headers": {
+          "X-Trace-Id": {
+            "$ref": "#/components/headers/TraceId"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
       }
     },
     "schemas": {
@@ -691,12 +709,65 @@
           "lon"
         ]
       },
+      "SensorData": {
+        "type": "object",
+        "properties": {
+          "sensor_id": {
+            "type": "string"
+          },
+          "sensor_type": {
+            "type": "string"
+          },
+          "site_id": {
+            "type": "string"
+          },
+          "metric_name": {
+            "type": "string"
+          },
+          "metric_value": {
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "status": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "metric_name",
+          "metric_value"
+        ]
+      },
       "IngestRequest": {
         "type": "object",
         "required": [
           "reporter_source",
-          "reporter_id",
-          "raw_content"
+          "reporter_id"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "raw_content"
+            ]
+          },
+          {
+            "required": [
+              "media_urls"
+            ]
+          },
+          {
+            "required": [
+              "sensor_data"
+            ]
+          }
         ],
         "properties": {
           "reporter_source": {
@@ -713,6 +784,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "sensor_data": {
+            "$ref": "#/components/schemas/SensorData"
           },
           "geo_location": {
             "$ref": "#/components/schemas/GeoLocation"
@@ -813,7 +887,8 @@
             "type": "string"
           },
           "link_to_incident_id": {
-            "type": "string"
+            "type": "string",
+            "description": "Optional incident reference to merge into. Only allowed when validation_status is VERIFIED and is validated against Incident Service before the link is stored."
           }
         }
       },

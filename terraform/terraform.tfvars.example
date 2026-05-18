@@ -12,6 +12,12 @@ gemini_api_keys = "YOUR_GEMINI_API_KEY_HERE"
 gemini_model    = "gemini-3.1-flash-lite"
 gemini_model_fallbacks = "gemini-3.1-flash-lite,gemini-3-flash-preview,gemma-4-26b-a4b-it,gemini-2.5-flash,gemini-2.5-flash-lite,gemma-4-31b-it"
 
+# Incident Service integration
+# Use the Incident REST API base URL for lookup validation, not the webhook receiver URL.
+incident_service_base_url = "https://incident-gateway-859kfcr6.uk.gateway.dev/api/v1"
+incident_service_timeout_seconds = 3
+incident_lookup_cache_ttl_seconds = 60
+
 # Lambda config
 lambda_memory_size    = 256
 lambda_timeout_api    = 30

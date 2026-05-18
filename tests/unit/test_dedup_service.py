@@ -2,6 +2,9 @@
 Unit tests for src/services/dedup_service.py
 """
 import pytest
+from unittest.mock import MagicMock
+
+from src.services.dedup_service import DedupService
 from src.services.dedup_service import (
     _haversine_meters,
     _within_time_window,
@@ -87,3 +90,18 @@ class TestContentSimilarity:
         b = _normalize_tokens("Road accident with minor injuries on highway")
         sim = _jaccard_similarity(a, b)
         assert sim < 0.4
+
+
+class TestDedupServiceExclusions:
+    """Tests for excluding the current report from dedup checks."""
+
+    def test_check_external_id_ignores_current_report(self):
+        mock_db = MagicMock()
+        mock_db.query.return_value = {
+            "Items": [{"report_id": {"S": "r-self"}}],
+        }
+
+        service = DedupService(dynamodb_client=mock_db)
+        existing_id = service.check_external_id("tweet-123", exclude_report_id="r-self")
+
+        assert existing_id is None

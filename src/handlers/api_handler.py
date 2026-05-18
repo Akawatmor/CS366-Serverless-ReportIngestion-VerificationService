@@ -17,6 +17,9 @@ from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from html import escape as xml_escape
 from typing import Any
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import boto3
 
@@ -68,6 +71,7 @@ REGION_BOUNDARIES: dict[str, dict[str, tuple[float, float] | str]] = {
 }
 
 _STATS_CACHE: dict[str, dict[str, Any]] = {}
+_INCIDENT_LOOKUP_CACHE: dict[str, dict[str, Any]] = {}
 
 CHANGELOG_ENTRIES: list[dict[str, str]] = [
     {
@@ -122,6 +126,71 @@ CHANGELOG_ENTRIES: list[dict[str, str]] = [
         "published_at": "2026-04-08T08:30:00+00:00",
     },
 ]
+
+
+def _get_cached_incident_lookup(incident_id: str) -> dict[str, Any] | None:
+    cached = _INCIDENT_LOOKUP_CACHE.get(incident_id)
+    if not cached:
+        return None
+
+    age_seconds = time.time() - cached["checked_at"]
+    if age_seconds > config.INCIDENT_LOOKUP_CACHE_TTL_SECONDS:
+        _INCIDENT_LOOKUP_CACHE.pop(incident_id, None)
+        return None
+    return cached
+
+
+def _cache_incident_lookup(incident_id: str, exists: bool, detail: str | None, http_status: int | None) -> None:
+    _INCIDENT_LOOKUP_CACHE[incident_id] = {
+        "exists": exists,
+        "detail": detail,
+        "http_status": http_status,
+        "checked_at": time.time(),
+    }
+
+
+def _validate_incident_reference(incident_id: str) -> tuple[bool, str | None, int | None]:
+    """Validate a linked incident ID against Incident Service with short-lived caching."""
+    incident_id = incident_id.strip()
+    if not incident_id:
+        return False, "link_to_incident_id cannot be empty.", 400
+
+    cached = _get_cached_incident_lookup(incident_id)
+    if cached is not None:
+        return cached["exists"], cached["detail"], cached["http_status"]
+
+    base_url = config.INCIDENT_SERVICE_BASE_URL.strip().rstrip("/")
+    if not base_url:
+        return False, "Incident reference validation is unavailable because INCIDENT_SERVICE_BASE_URL is not configured.", None
+
+    url = f"{base_url}/incidents/{urllib.parse.quote(incident_id, safe='')}"
+    request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json", "User-Agent": "report-verify-incident-check/1.0"},
+        method="GET",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=config.INCIDENT_SERVICE_TIMEOUT_SECONDS) as resp:
+            resp.read()
+            _cache_incident_lookup(incident_id, True, None, getattr(resp, "status", 200))
+            return True, None, getattr(resp, "status", 200)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            detail = f"Incident '{incident_id}' was not found in Incident Service."
+            _cache_incident_lookup(incident_id, False, detail, exc.code)
+            return False, detail, exc.code
+        logger.warning(
+            "Incident reference lookup failed",
+            extra={"data": {"incident_id": incident_id, "http_status": exc.code}},
+        )
+        return False, f"Incident Service validation failed (HTTP {exc.code}).", exc.code
+    except Exception as exc:
+        logger.warning(
+            "Incident reference lookup unavailable",
+            extra={"data": {"incident_id": incident_id, "error": str(exc)[:200]}},
+        )
+        return False, "Incident Service validation is currently unavailable.", None
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +418,7 @@ def _handle_verify(report_id: str, body: dict, dynamodb, trace_id: str | None = 
         return response.conflict(transition_error, trace_id=trace_id)
 
     # Determine action
-    link_incident_id = body.get("link_to_incident_id")
+    link_incident_id = (body.get("link_to_incident_id") or "").strip() or None
     if new_status == ValidationStatus.VERIFIED.value:
         if link_incident_id:
             action_taken = VerificationAction.MERGED_EXISTING_INCIDENT.value
@@ -357,6 +426,19 @@ def _handle_verify(report_id: str, body: dict, dynamodb, trace_id: str | None = 
             action_taken = VerificationAction.TRIGGER_NEW_INCIDENT.value
     else:
         action_taken = VerificationAction.NO_ACTION.value
+
+    if new_status == ValidationStatus.VERIFIED.value and link_incident_id:
+        incident_ok, incident_detail, incident_http_status = _validate_incident_reference(link_incident_id)
+        if not incident_ok:
+            if incident_http_status == 404:
+                return response.bad_request("Validation failed.", incident_detail, trace_id=trace_id)
+            return response.error(
+                503,
+                "Incident Service unavailable.",
+                incident_detail,
+                trace_id=trace_id,
+                error_code="E503",
+            )
 
     # Update with optimistic locking (ConditionExpression)
     now = datetime.now(timezone.utc).isoformat()
@@ -449,6 +531,7 @@ def _handle_verify(report_id: str, body: dict, dynamodb, trace_id: str | None = 
             verified_by=body.get("reviewer_id", ""),
             verification_notes=body.get("reviewer_notes", ""),
             action=action_taken,
+            target_incident_id=link_incident_id,
         )
 
     return response.success({

@@ -5,7 +5,7 @@
 # Usage:
 #   ./scripts/deploy.sh                    # deploy with defaults
 #   ./scripts/deploy.sh --auto-approve     # skip confirmation
-#   Reads .env file for GEMINI_API_KEY1, GEMINI_API_KEY2, etc.
+#   Reads .env file for GEMINI_API_KEY1, GEMINI_API_KEY2, INCIDENT_SERVICE_BASE_URL, etc.
 # ============================================================
 set -euo pipefail
 
@@ -182,9 +182,18 @@ if ! is_configured_value "$PRIMARY_GEMINI_MODEL"; then
     PRIMARY_GEMINI_MODEL="${GEMINI_MODELS_CSV%%,*}"
 fi
 
+INCIDENT_SERVICE_BASE_URL_VALUE="${INCIDENT_SERVICE_BASE_URL:-}"
+INCIDENT_SERVICE_TIMEOUT_VALUE="${INCIDENT_SERVICE_TIMEOUT_SECONDS:-3}"
+INCIDENT_LOOKUP_CACHE_TTL_VALUE="${INCIDENT_LOOKUP_CACHE_TTL_SECONDS:-60}"
+
 echo "  -> Total Gemini models: $MODEL_COUNT"
 echo "  -> Gemini model chain: $GEMINI_MODELS_CSV"
 echo "  -> Primary Gemini model: $PRIMARY_GEMINI_MODEL"
+if is_configured_value "$INCIDENT_SERVICE_BASE_URL_VALUE"; then
+    echo "  -> Incident Service base URL: $INCIDENT_SERVICE_BASE_URL_VALUE"
+else
+    echo "  -> Incident Service base URL: (not configured)"
+fi
 
 # Generate terraform.tfvars (overwrite if exists)
 TFVARS_FILE="$TF_DIR/terraform.tfvars"
@@ -200,6 +209,9 @@ aws_region   = "us-east-1"
 gemini_api_keys = "$GEMINI_KEYS_CSV"
 gemini_model    = "$PRIMARY_GEMINI_MODEL"
 gemini_model_fallbacks = "$GEMINI_MODELS_CSV"
+incident_service_base_url = "$INCIDENT_SERVICE_BASE_URL_VALUE"
+incident_service_timeout_seconds = $INCIDENT_SERVICE_TIMEOUT_VALUE
+incident_lookup_cache_ttl_seconds = $INCIDENT_LOOKUP_CACHE_TTL_VALUE
 EOF
 
 echo "  -> Generated: $TFVARS_FILE"

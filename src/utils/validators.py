@@ -44,8 +44,10 @@ def validate_ingest_payload(body: dict[str, Any]) -> list[str]:
     # raw_content or media_urls — at least one
     has_content = bool(body.get("raw_content"))
     has_media = bool(body.get("media_urls")) and len(body.get("media_urls", [])) > 0
-    if not has_content and not has_media:
-        errors.append("At least one of raw_content or media_urls is required.")
+    sensor_data = body.get("sensor_data")
+    has_sensor_data = isinstance(sensor_data, dict) and len(sensor_data) > 0
+    if not has_content and not has_media and not has_sensor_data:
+        errors.append("At least one of raw_content, media_urls, or sensor_data is required.")
 
     # geo_location — optional but validate shape if present
     geo = body.get("geo_location")
@@ -67,6 +69,10 @@ def validate_ingest_payload(body: dict[str, Any]) -> list[str]:
             for i, url in enumerate(media):
                 if not isinstance(url, str) or not url.startswith("http"):
                     errors.append(f"media_urls[{i}] is not a valid URL.")
+
+    # sensor_data — optional structured sensor payload, useful for IOT sources
+    if sensor_data is not None:
+        errors.extend(_validate_sensor_data(sensor_data))
 
     return errors
 
@@ -123,6 +129,8 @@ def validate_verify_payload(body: dict[str, Any]) -> list[str]:
     link = body.get("link_to_incident_id")
     if link and not isinstance(link, str):
         errors.append("link_to_incident_id must be a string.")
+    if link and status != ValidationStatus.VERIFIED.value:
+        errors.append("link_to_incident_id is only allowed when validation_status is VERIFIED.")
 
     return errors
 
@@ -261,6 +269,48 @@ def _validate_geo(geo: Any) -> list[str]:
                 errors.append("geo_location.lon must be between -180 and 180.")
         except (ValueError, TypeError):
             errors.append("geo_location.lat and lon must be numeric.")
+    return errors
+
+
+def _validate_sensor_data(sensor_data: Any) -> list[str]:
+    """Validate optional structured sensor metadata."""
+    errors: list[str] = []
+    if not isinstance(sensor_data, dict):
+        errors.append("sensor_data must be an object.")
+        return errors
+
+    string_fields = {
+        "sensor_id",
+        "sensor_type",
+        "site_id",
+        "metric_name",
+        "unit",
+        "status",
+    }
+    numeric_fields = {"metric_value", "threshold"}
+
+    for field_name in string_fields:
+        value = sensor_data.get(field_name)
+        if value is not None and not isinstance(value, str):
+            errors.append(f"sensor_data.{field_name} must be a string.")
+
+    for field_name in numeric_fields:
+        value = sensor_data.get(field_name)
+        if value is None:
+            continue
+        try:
+            float(value)
+        except (TypeError, ValueError):
+            errors.append(f"sensor_data.{field_name} must be numeric.")
+
+    if sensor_data.get("observed_at") and not _is_iso8601(sensor_data["observed_at"]):
+        errors.append("sensor_data.observed_at must be ISO8601 format.")
+
+    if not sensor_data.get("metric_name"):
+        errors.append("sensor_data.metric_name is required when sensor_data is provided.")
+    if sensor_data.get("metric_value") is None:
+        errors.append("sensor_data.metric_value is required when sensor_data is provided.")
+
     return errors
 
 

@@ -2,7 +2,9 @@
 Unit tests for ingestion worker decision helpers.
 """
 
-from src.handlers.ingestion_worker import _determine_priority, _determine_status
+from unittest.mock import MagicMock
+
+from src.handlers.ingestion_worker import _determine_priority, _determine_status, _get_reporter_history
 from src.models.enums import ValidationStatus
 
 
@@ -54,3 +56,35 @@ class TestIngestionStatus:
             body={},
         )
         assert status == ValidationStatus.SPAM.value
+
+
+class TestReporterHistory:
+    """Reporter history lookups should ignore the current placeholder record."""
+
+    def test_reporter_history_excludes_current_report(self):
+        mock_db = MagicMock()
+        mock_db.query.return_value = {
+            "Items": [
+                {
+                    "report_id": {"S": "r-current"},
+                    "validation_status": {"S": "RECEIVED"},
+                    "trust_score": {"N": "0"},
+                    "ingested_at": {"S": "2026-02-18T14:30:05Z"},
+                },
+                {
+                    "report_id": {"S": "r-older"},
+                    "validation_status": {"S": "VERIFIED"},
+                    "trust_score": {"N": "82"},
+                    "ingested_at": {"S": "2026-02-17T14:30:05Z"},
+                },
+            ]
+        }
+
+        history, stats = _get_reporter_history(
+            mock_db,
+            reporter_id="@user",
+            exclude_report_id="r-current",
+        )
+
+        assert "1 prior report" in history
+        assert stats == {"total": 1, "verified": 1, "spam": 0, "recent_count": 0}

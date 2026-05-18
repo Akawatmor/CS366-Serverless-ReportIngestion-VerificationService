@@ -34,6 +34,11 @@ class Config:
     EVENT_BUS_NAME: str = os.environ.get("EVENT_BUS_NAME", "disaster-event-bus")
     EVENT_SOURCE: str = "service.report-verify"
 
+    # Incident Service integration
+    INCIDENT_SERVICE_BASE_URL: str = os.environ.get("INCIDENT_SERVICE_BASE_URL", "")
+    INCIDENT_SERVICE_TIMEOUT_SECONDS: int = int(os.environ.get("INCIDENT_SERVICE_TIMEOUT_SECONDS", "3"))
+    INCIDENT_LOOKUP_CACHE_TTL_SECONDS: int = int(os.environ.get("INCIDENT_LOOKUP_CACHE_TTL_SECONDS", "60"))
+
     # S3 Media
     MEDIA_BUCKET: str = os.environ.get("MEDIA_BUCKET", "")
 

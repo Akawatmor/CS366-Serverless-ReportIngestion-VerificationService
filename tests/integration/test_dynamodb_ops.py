@@ -27,6 +27,7 @@ def dynamodb_tables():
                 {"AttributeName": "validation_status", "AttributeType": "S"},
                 {"AttributeName": "ingested_at", "AttributeType": "S"},
                 {"AttributeName": "source_external_id", "AttributeType": "S"},
+                {"AttributeName": "reporter_id", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -43,6 +44,14 @@ def dynamodb_tables():
                         {"AttributeName": "source_external_id", "KeyType": "HASH"},
                     ],
                     "Projection": {"ProjectionType": "KEYS_ONLY"},
+                },
+                {
+                    "IndexName": "gsi_reporter",
+                    "KeySchema": [
+                        {"AttributeName": "reporter_id", "KeyType": "HASH"},
+                        {"AttributeName": "ingested_at", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
                 },
             ],
             BillingMode="PAY_PER_REQUEST",

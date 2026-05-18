@@ -83,7 +83,10 @@ def _process_single_report(
     logger.info("Processing report", extra={"data": {"report_id": report_id}})
 
     # --- 1. Idempotency check ---
-    existing_id = dedup_svc.check_external_id(body.get("source_external_id"))
+    existing_id = dedup_svc.check_external_id(
+        body.get("source_external_id"),
+        exclude_report_id=report_id,
+    )
     if existing_id:
         logger.info(
             "Skipping duplicate (external_id match)",
@@ -96,7 +99,9 @@ def _process_single_report(
 
     # --- 2a. Fetch reporter history for Gemini context and Python scoring ---
     reporter_history_str, reporter_history_stats = _get_reporter_history(
-        dynamodb, body.get("reporter_id", "")
+        dynamodb,
+        body.get("reporter_id", ""),
+        exclude_report_id=report_id,
     )
 
     # --- 2b. Rate-limit check: ≥ RATE_LIMIT_THRESHOLD reports in window → force SPAM ---
@@ -127,6 +132,7 @@ def _process_single_report(
             lon=geo.get("lon"),
             timestamp=body.get("timestamp", ""),
             media_urls=body.get("media_urls", []),
+            sensor_data=body.get("sensor_data"),
             reporter_history=reporter_history_str,
         )
 
@@ -137,12 +143,14 @@ def _process_single_report(
             lat=float(geo["lat"]),
             lon=float(geo["lon"]),
             event_time=body.get("timestamp"),
+            exclude_report_id=report_id,
         )
 
     # Add text similarity dedup even when geo is missing/noisy.
     similar_by_content = dedup_svc.find_content_similar_reports(
         raw_content=body.get("raw_content", ""),
         event_time=body.get("timestamp"),
+        exclude_report_id=report_id,
     )
     potential_duplicates = list(dict.fromkeys(potential_duplicates + similar_by_content))
 
@@ -163,6 +171,7 @@ def _process_single_report(
         reporter_id=body.get("reporter_id", ""),
         raw_content=body.get("raw_content", ""),
         media_urls=body.get("media_urls", []),
+        sensor_data=body.get("sensor_data"),
         geo_location=geo_location,
         event_timestamp=body.get("timestamp"),
         ingested_at=body.get("ingested_at", datetime.now(timezone.utc).isoformat()),
@@ -357,7 +366,11 @@ def _increment_stat(dynamodb, stat_key: str) -> None:
         logger.error(f"Failed to update stat counter: {e}")
 
 
-def _get_reporter_history(dynamodb, reporter_id: str) -> tuple[str, dict]:
+def _get_reporter_history(
+    dynamodb,
+    reporter_id: str,
+    exclude_report_id: str | None = None,
+) -> tuple[str, dict]:
     """
     Fetch past reports for reporter_id.
 
@@ -383,7 +396,11 @@ def _get_reporter_history(dynamodb, reporter_id: str) -> tuple[str, dict]:
             Limit=20,
         )
 
-        items = resp.get("Items", [])
+        items = [
+            item
+            for item in resp.get("Items", [])
+            if item.get("report_id", {}).get("S") != exclude_report_id
+        ]
         if not items:
             return "First-time reporter \u2014 no previous reports found.", _empty_stats
 

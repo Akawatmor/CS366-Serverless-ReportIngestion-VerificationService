@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock
 from moto import mock_aws
 
 from src.config import config
+from src.models.report import GeoLocation, Report
 
 
 @pytest.fixture
@@ -34,6 +35,7 @@ def aws_environment():
                 {"AttributeName": "validation_status", "AttributeType": "S"},
                 {"AttributeName": "ingested_at", "AttributeType": "S"},
                 {"AttributeName": "source_external_id", "AttributeType": "S"},
+                {"AttributeName": "reporter_id", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
                 {
@@ -50,6 +52,14 @@ def aws_environment():
                         {"AttributeName": "source_external_id", "KeyType": "HASH"},
                     ],
                     "Projection": {"ProjectionType": "KEYS_ONLY"},
+                },
+                {
+                    "IndexName": "gsi_reporter",
+                    "KeySchema": [
+                        {"AttributeName": "reporter_id", "KeyType": "HASH"},
+                        {"AttributeName": "ingested_at", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
                 },
             ],
             BillingMode="PAY_PER_REQUEST",
@@ -130,6 +140,26 @@ class TestSQSFlow:
             "ai_analysis_failed": False,
             "vision_used": False,
         }
+
+        placeholder = Report(
+            report_id=sample_sqs_message["report_id"],
+            source_platform=sample_sqs_message["reporter_source"],
+            source_external_id=sample_sqs_message["source_external_id"],
+            reporter_id=sample_sqs_message["reporter_id"],
+            raw_content=sample_sqs_message["raw_content"],
+            media_urls=sample_sqs_message["media_urls"],
+            geo_location=GeoLocation(
+                lat=sample_sqs_message["geo_location"]["lat"],
+                lon=sample_sqs_message["geo_location"]["lon"],
+            ),
+            event_timestamp=sample_sqs_message["timestamp"],
+            ingested_at=sample_sqs_message["ingested_at"],
+            validation_status="RECEIVED",
+        )
+        aws_environment["dynamodb"].put_item(
+            TableName=config.REPORTS_TABLE,
+            Item=placeholder.to_dynamodb_item(),
+        )
 
         # Build SQS event format
         sqs_event = {

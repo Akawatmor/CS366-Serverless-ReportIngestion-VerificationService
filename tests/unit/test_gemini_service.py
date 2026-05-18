@@ -83,6 +83,41 @@ class TestGeminiService:
         assert result["content_score"] == 15
         assert result["ai_analysis_failed"] is True
 
+    def test_iot_source_uses_sensor_prompt(self):
+        """IOT sensor reports should use the sensor-specific prompt branch."""
+        self.service._call_gemini = MagicMock(return_value=json.dumps({
+            "content_score": 23,
+            "content_score_reasoning": "Points awarded for site id, timestamp, and threshold breach.",
+            "suggested_category": "FLOOD",
+            "keywords": ["water_level", "threshold_breach"],
+            "spam_signals": [],
+            "is_spam_likely": False,
+        }))
+
+        result = self.service.analyze_report(
+            content="",
+            source="IOT_SENSOR",
+            reporter_id="sensor-station-01",
+            timestamp="2026-02-18T14:30:00Z",
+            sensor_data={
+                "sensor_id": "wl-01",
+                "site_id": "pier-03",
+                "metric_name": "water_level",
+                "metric_value": 2.8,
+                "unit": "m",
+                "threshold": 2.0,
+                "status": "CRITICAL",
+            },
+        )
+
+        prompt = self.service._call_gemini.call_args.args[0]
+        assert "machine-generated alert" in prompt
+        assert "metric, unit, threshold, anomaly, or status" in prompt
+        assert "damage or number of people affected" not in prompt
+        assert "water_level" in prompt
+        assert "2.8" in prompt
+        assert result["content_score"] == 23
+
     @patch("urllib.request.urlopen")
     def test_health_check_success(self, mock_urlopen):
         """Health check returns healthy when API responds."""

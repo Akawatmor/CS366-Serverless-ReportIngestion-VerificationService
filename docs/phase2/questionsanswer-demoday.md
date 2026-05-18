@@ -30,7 +30,7 @@ Repository นี้ไม่ได้เป็น "ระบบจัดกา�
 ควรเตรียมอย่างน้อย 2 หน้าจอหรือ 2 tab พร้อมกัน:
 
 1. หน้า `dashboard` สำหรับยิง API, ดู health, stats, events, upload URL, verify/delete แบบตรงไปตรงมา
-2. หน้า `admin-verify` สำหรับให้เจ้าหน้าที่ดูรายการ pending report, อ่าน AI analysis, กด verify/reject/delete, ดู audit trail, และใส่ `link_to_incident_id` เพื่อ merge เข้ากับ incident เดิม
+2. หน้า `admin-verify` สำหรับให้เจ้าหน้าที่ดูรายการ pending report, อ่าน AI analysis, กด verify/reject/delete, ดู audit trail, และใส่ `link_to_incident_id` เพื่ออ้างอิง incident เดิมหรือส่ง merge intent ไปยัง incident side
 
 เหตุผลที่ควรเปิดทั้งสองหน้า เพราะ frontend ที่มีอยู่ใน repo แบ่งบทบาทชัดเจน:
 
@@ -43,7 +43,7 @@ Repository นี้ไม่ได้เป็น "ระบบจัดกา�
 2. `API key` สำหรับ `POST /v1/reports` และ `POST /v1/reports/upload-url`
 3. URL ของหน้า `dashboard` และ `admin-verify`
 4. ถ้าจะเดโมรูปภาพ ควรเตรียมไฟล์รูปและทดสอบ flow upload ล่วงหน้า
-5. ถ้าจะเดโมการ merge เข้ากับ incident เดิม ควรมี `incident_id` ตัวอย่างเตรียมไว้ หรือเตรียมสร้าง incident แรกก่อนแล้วค่อยเดโม report ตัวถัดไปด้วย `link_to_incident_id`
+5. ถ้าจะเดโมการเชื่อมกับ incident เดิม ควรมี `incident_id` ตัวอย่างเตรียมไว้ หรือเตรียมสร้าง incident แรกก่อนแล้วค่อยเดโม report ตัวถัดไปด้วย `link_to_incident_id` พร้อมตั้งค่า `INCIDENT_SERVICE_BASE_URL` ให้ environment นี้ตรวจสอบ incident reference ได้จริง
 
 ### 2. สิ่งที่ควรตรวจเช็กก่อนเริ่มเดโม
 
@@ -62,7 +62,7 @@ Repository นี้ไม่ได้เป็น "ระบบจัดกา�
 
 > "ถ้า health เป็น healthy แปลว่าระบบรับงาน, คิวงาน, การเก็บข้อมูล, และการ publish event พร้อมใช้งาน ถ้า Gemini มีปัญหา ระบบยังพอทำงานได้แต่จะลดระดับเป็น manual review มากขึ้น"
 
-ประโยคนี้พูดได้อย่างมั่นใจ เพราะ `gemini_service.py` มี fallback ชัดเจน: ถ้าไม่มี key หรือ AI call ล้มเหลว ระบบจะคืนค่า default พร้อม `ai_analysis_failed=True` และให้ manual review ตัดสินต่อ
+ประโยคนี้พูดได้อย่างมั่นใจ เพราะ `gemini_service.py` มี fallback ชัดเจน: ถ้าไม่มี key หรือ AI call ล้มเหลว ระบบจะคืนค่า default พร้อม `ai_analysis_failed=True` และให้ manual review ตัดสินต่อ โดย model chain ปัจจุบันคือ `gemini-3.1-flash-lite -> gemini-3-flash-preview -> gemma-4-26b-a4b-it -> gemini-2.5-flash -> gemini-2.5-flash-lite -> gemma-4-31b-it`
 
 #### 2.2 ยืนยัน write path ที่ต้องใช้ API key
 
@@ -124,6 +124,20 @@ Repository นี้ไม่ได้เป็น "ระบบจัดกา�
 
 ถ้าต้องการโชว์ว่า architecture รองรับ "incident lifecycle" มากกว่าแค่สร้าง incident ใหม่ทุกครั้ง ควรใช้ field นี้
 
+อย่างไรก็ตามควรพูดให้ตรงกับ implementation ปัจจุบันว่า field นี้ทำงานผ่าน 3 ชั้นร่วมกัน คือใช้เก็บ `linked_incident_id` ใน report, ส่ง merge intent/target ไปกับ `ReportVerifiedEvent`, และรองรับ callback จาก incident side เพื่ออัปเดต link กลับเข้าระบบ
+
+เชิงเทคนิค flow ปัจจุบันคือ backend จะ validate `link_to_incident_id` ตอน `PATCH /v1/reports/{id}` โดยยิง `GET {INCIDENT_SERVICE_BASE_URL}/incidents/{incident_id}` ไม่ได้มีหน้าเลือก active incidents จาก frontend โดยตรง
+
+behavior ที่ควรจำให้แม่นมี 3 ข้อ:
+
+1. `link_to_incident_id` ใช้ได้เฉพาะตอน `validation_status=VERIFIED`
+2. ถ้า incident ไม่พบ ระบบจะตอบ `400 Bad Request`
+3. ถ้า Incident Service ใช้งานไม่ได้หรือ environment ไม่ได้ตั้ง `INCIDENT_SERVICE_BASE_URL` ระบบจะตอบ `503 Service Unavailable`
+
+สรุปสุดท้ายสำหรับบนเวทีควรพูดแบบนี้:
+
+> "ตอนนี้ระบบรองรับการเชื่อม incident เดิมได้แข็งแรงขึ้นแล้ว เพราะส่ง linked incident target และ merge action ไปกับ `ReportVerifiedEvent` และจะเช็ค `incident_id` กับ Incident Service ก่อนเขียน `linked_incident_id` แต่ flow นี้ยังขึ้นกับการตั้งค่า Incident Service endpoint และความพร้อมของ service ปลายทาง"
+
 ### 3. ลำดับการโชว์ setup ที่แนะนำ
 
 ภายใน 10 นาที แนะนำให้เรียงตามนี้:
@@ -136,7 +150,7 @@ Repository นี้ไม่ได้เป็น "ระบบจัดกา�
 
 ### 4. ประเด็นที่ควรพูดเองก่อนกรรมการถาม
 
-1. ระบบนี้รับ natural-language report ได้โดย design เพราะ validation ของ ingest บังคับเพียง `reporter_source`, `reporter_id`, และอย่างน้อยหนึ่งใน `raw_content` หรือ `media_urls`
+1. ระบบนี้รับ natural-language report ได้โดย design เพราะ validation ของ ingest บังคับเพียง `reporter_source`, `reporter_id`, และอย่างน้อยหนึ่งใน `raw_content`, `media_urls`, หรือ `sensor_data`
 2. ถ้าไม่มีพิกัด ระบบยังรับได้ แต่ trust score จะไม่เต็มและ dedup/geospatial analytics จะแม่นน้อยลง
 3. ถ้า AI ใช้งานไม่ได้ ระบบยังรับงานได้ แต่จะ fallback ไป manual review มากขึ้น
 4. environment ปัจจุบันเหมาะสำหรับเดโมและ internal integration มากกว่า production hardening เต็มรูปแบบ
@@ -352,6 +366,8 @@ threshold สำคัญจาก config ปัจจุบันคือ:
 7. Property Damage Report สำหรับความเสียหายทรัพย์สิน
 8. SafeRoute สำหรับประเมินเส้นทางปลอดภัย
 
+แต่ควรระบุเพิ่มด้วยว่าการเชื่อมต่อเหล่านี้ใน repo ปัจจุบันยังเป็นระดับ generic verified event / incident handoff เป็นหลัก ไม่ใช่ typed direct integration เฉพาะโดเมน ดังนั้นเคส hospital, shelter, donation, missing person จะยังออกจาก service นี้ในรูป verified report หรือ incident context ก่อน แล้วให้ service owner ปลายทางแปลงต่อ
+
 แต่ต้องพูดกำกับทุกครั้งว่า:
 
 > "repo นี้เป็น upstream verified-intake service ของ cluster ไม่ได้ contain logic ภายในของ service ปลายทางเหล่านั้น"
@@ -419,14 +435,16 @@ threshold สำคัญจาก config ปัจจุบันคือ:
 
 1. payload รองรับ source ที่เป็น `IOT_SENSOR` หรือ `OFFICIAL_APP`
 2. source score ของ `IOT_SENSOR` สูงถึง 20 และ `OFFICIAL_APP` สูงถึง 18 ทำให้ trust score เริ่มต้นดี
-3. ถ้ามีพิกัด lat/lon จะได้ geo score เพิ่ม และ downstream map/stats จะมีคุณภาพมากขึ้น
-4. หลัง verify แล้ว publish เป็น incident/update ได้ทันที
+3. ถ้าส่ง `sensor_data` แบบ structured เช่น `sensor_id`, `metric_name`, `metric_value`, `unit`, `threshold`, `observed_at` ระบบจะตีความ alert ของ sensor ได้ตรงบริบทมากขึ้น และ Gemini จะไม่คาดหวัง narrative แบบ citizen report
+4. ถ้ามีพิกัด lat/lon จะได้ geo score เพิ่ม และ downstream map/stats จะมีคุณภาพมากขึ้น
+5. หลัง verify แล้ว publish เป็น incident/update ได้ทันที
 
 สิ่งที่ควรสาธิต:
 
 1. ส่งข้อความลักษณะ "ระดับน้ำในคลอง...สูงกว่าค่าปกติ" หรือ "เทศบาลประกาศเตือนอพยพ"
 2. ใช้ `reporter_source=IOT_SENSOR` หรือ `OFFICIAL_APP`
-3. ให้เจ้าหน้าที่ verify แล้วโชว์ event ที่ถูก publish
+3. ถ้าเป็น `IOT_SENSOR` ควรแนบ `sensor_data` ไปด้วย ไม่ควรพึ่งข้อความธรรมดาอย่างเดียว
+4. ให้เจ้าหน้าที่ verify แล้วโชว์ event ที่ถูก publish
 
 สิ่งที่ควรพูดเพิ่ม:
 
@@ -662,6 +680,7 @@ threshold สำคัญจาก config ปัจจุบันคือ:
 3. ถ้า data input ไม่ใส่พิกัดหรือ media downstream usefulness จะลดลง
 4. service นี้ไม่ใช่ source of truth ของ hospital, shelter, donation, missing person, หรือ property claim data
 5. การตัดสินใจสุดท้ายยังพึ่งเจ้าหน้าที่ จึงไม่ได้เป็น fully automated incident creation system
+6. incident merge ตอนนี้มีทั้ง event contract สำหรับ merge intent และ incident reference validation แล้ว แต่ยังขึ้นกับ Incident Service availability และ callback correctness จากฝั่งปลายทาง
 
 ### 7. ประโยคสรุปที่ควรใช้ปิดการนำเสนอ
 
@@ -685,6 +704,31 @@ threshold สำคัญจาก config ปัจจุบันคือ:
     "lon": 100.5018
   },
   "timestamp": "2026-05-14T10:30:00Z"
+}
+```
+
+### ตัวอย่าง ingest payload สำหรับเคส `IOT_SENSOR`
+
+```json
+{
+  "reporter_source": "IOT_SENSOR",
+  "reporter_id": "sensor-station-bkk-01",
+  "geo_location": {
+    "lat": 13.7563,
+    "lon": 100.5018
+  },
+  "timestamp": "2026-05-14T10:30:00Z",
+  "sensor_data": {
+    "sensor_id": "wl-01",
+    "sensor_type": "water-level",
+    "site_id": "canal-gate-3",
+    "metric_name": "water_level",
+    "metric_value": 2.8,
+    "unit": "m",
+    "threshold": 2.0,
+    "status": "CRITICAL",
+    "observed_at": "2026-05-14T10:29:30Z"
+  }
 }
 ```
 
@@ -713,5 +757,5 @@ threshold สำคัญจาก config ปัจจุบันคือ:
 
 1. ถ้าจะยิงข้อความคล้ายกันหลายรอบ ให้ปรับ timestamp/พิกัด/ถ้อยคำเพื่อไม่ให้โดน dedup โดยไม่ตั้งใจ
 2. ถ้าอยากโชว์ media analysis ให้ทดสอบ `upload-url` ล่วงหน้า
-3. ถ้าอยากโชว์ lifecycle ของเหตุการณ์ ให้เตรียม incident เดิมไว้แล้วใช้ `link_to_incident_id`
+3. ถ้าอยากโชว์ lifecycle ของเหตุการณ์ ให้เตรียม incident เดิมไว้แล้วใช้ `link_to_incident_id` พร้อมตั้งค่า Incident Service endpoint ให้ระบบ validate reference ได้จริงก่อนเดโม
 4. ถ้าอยากตอบได้สวยเวลาเจอเคสนอก scope ให้ยึดหลัก `รับได้ -> verify ได้ -> handoff ได้ -> แต่ไม่ claim ว่าเป็น owner ของ workflow ปลายทาง`

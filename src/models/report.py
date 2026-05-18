@@ -19,6 +19,33 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _sensor_data_to_dynamodb_map(sensor_data: dict) -> dict:
+    result: dict = {}
+    for key, value in sensor_data.items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            result[key] = {"BOOL": value}
+        elif isinstance(value, (int, float)):
+            result[key] = {"N": str(value)}
+        else:
+            result[key] = {"S": str(value)}
+    return result
+
+
+def _sensor_data_from_dynamodb_map(sensor_data_map: dict) -> dict:
+    result: dict = {}
+    for key, value in sensor_data_map.items():
+        if "S" in value:
+            result[key] = value["S"]
+        elif "N" in value:
+            number = value["N"]
+            result[key] = float(number) if "." in number else int(number)
+        elif "BOOL" in value:
+            result[key] = value["BOOL"]
+    return result
+
+
 @dataclass
 class GeoLocation:
     lat: float
@@ -47,6 +74,7 @@ class Report:
     # Content
     raw_content: str = ""
     media_urls: list[str] = field(default_factory=list)
+    sensor_data: Optional[dict] = None
     geo_location: Optional[GeoLocation] = None
 
     # Timestamps
@@ -87,6 +115,8 @@ class Report:
             item["source_external_id"] = {"S": self.source_external_id}
         if self.media_urls:
             item["media_urls"] = {"L": [{"S": u} for u in self.media_urls]}
+        if self.sensor_data:
+            item["sensor_data"] = {"M": _sensor_data_to_dynamodb_map(self.sensor_data)}
         if self.geo_location:
             item["geo_location"] = {"M": {
                 "lat": {"N": str(self.geo_location.lat)},
@@ -128,6 +158,7 @@ class Report:
             reporter_id=item["reporter_id"]["S"],
             raw_content=item["raw_content"]["S"],
             media_urls=[u["S"] for u in item.get("media_urls", {}).get("L", [])],
+            sensor_data=_sensor_data_from_dynamodb_map(item["sensor_data"]["M"]) if "sensor_data" in item else None,
             geo_location=geo,
             event_timestamp=item.get("event_timestamp", {}).get("S"),
             ingested_at=item["ingested_at"]["S"],
@@ -180,6 +211,7 @@ class Report:
                 "text": self.raw_content,
                 "images": [u for u in self.media_urls if u.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))],
                 "video": next((u for u in self.media_urls if u.endswith((".mp4", ".mov", ".avi"))), None),
+                "sensor_data": self.sensor_data,
             },
             "analysis": {
                 "trust_score": self.trust_score,

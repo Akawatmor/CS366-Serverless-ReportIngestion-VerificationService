@@ -91,6 +91,9 @@ resource "aws_lambda_function" "api_handler" {
       GEMINI_API_KEYS = var.gemini_api_keys
       GEMINI_MODEL    = var.gemini_model
       GEMINI_MODEL_FALLBACKS = var.gemini_model_fallbacks
+      INCIDENT_SERVICE_BASE_URL = var.incident_service_base_url
+      INCIDENT_SERVICE_TIMEOUT_SECONDS = tostring(var.incident_service_timeout_seconds)
+      INCIDENT_LOOKUP_CACHE_TTL_SECONDS = tostring(var.incident_lookup_cache_ttl_seconds)
       LOG_LEVEL      = "INFO"
       PYTHONPATH      = "/var/task"
     }
@@ -121,6 +124,7 @@ resource "aws_lambda_function" "ingest_handler" {
 
   environment {
     variables = {
+      REPORTS_TABLE = aws_dynamodb_table.reports.name
       SQS_QUEUE_URL = aws_sqs_queue.ingestion_queue.url
       LOG_LEVEL     = "INFO"
       PYTHONPATH     = "/var/task"

@@ -42,7 +42,8 @@ class TestEventPublisher:
             },
             verified_by="officer_007",
             verification_notes="Confirmed via CCTV",
-            action="CREATE_NEW_INCIDENT",
+            action="MERGED_EXISTING_INCIDENT",
+            target_incident_id="019C774D-1AC5-75BB-AE95-5CD4AEB8925B",
         )
 
         assert event_id.startswith("evt-")
