@@ -1,6 +1,6 @@
 # CS366 — Report Ingestion & Verification Service
 
-> Serverless Microservice สำหรับรับรายงานภัยพิบัติ (Disaster Reports) ประมวลผลด้วย AI แล้วให้เจ้าหน้าที่ Verify ก่อนสร้าง Incident
+> Serverless intake and human-verification layer สำหรับ disaster reports: รับข้อมูลดิบ, วิเคราะห์ด้วย AI, คัดซ้ำ, ให้เจ้าหน้าที่ verify, แล้ว publish ต่อให้ service downstream ใช้งานได้จริง
 
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![Terraform](https://img.shields.io/badge/Terraform-1.5+-purple.svg)](https://www.terraform.io/)
@@ -9,59 +9,61 @@
 
 ## 📋 Overview
 
-ระบบนี้ทำหน้าที่เป็น **Central Gateway** สำหรับรับข้อมูลเหตุภัยพิบัติจากแหล่งต่างๆ (Social Media, Mobile Apps, IoT Sensors) แล้วทำการ:
+ระบบนี้ทำหน้าที่เป็น verified-intake gateway สำหรับข้อมูลเหตุภัยพิบัติจากหลายแหล่ง เช่น social posts, mobile app reports, และ IoT sensor alerts โดย flow ปัจจุบันคือ:
 
-1. **Ingest** — รับ raw report ผ่าน REST API → คิวด้วย SQS
-2. **Analyze** — ใช้ Google Gemini AI วิเคราะห์ trust score
-3. **Deduplicate** — ตรวจจับรายงานซ้ำด้วย Haversine distance + time window
-4. **Verify** — เจ้าหน้าที่กด approve/reject ผ่าน API
-5. **Publish** — ส่ง Event ผ่าน EventBridge ไปสร้าง Incident
+1. **Ingest** — รับ report ผ่าน `POST /v1/reports` หรืออัปโหลด media แยกผ่าน `POST /v1/reports/upload-url`
+2. **Queue & Persist** — บันทึก placeholder report ลง DynamoDB แล้วส่งงานต่อเข้า SQS
+3. **Analyze** — ใช้ Gemini วิเคราะห์ trust score, suggested category, tags และทำ graceful fallback ได้ถ้า AI ใช้งานไม่ได้
+4. **Deduplicate** — ตรวจซ้ำจาก `source_external_id`, geo/time proximity, และ content similarity
+5. **Verify** — เจ้าหน้าที่ review ผ่าน API หรือหน้า `admin-verify` แล้วเลือก verify/reject/spam/duplicate
+6. **Publish & Link Back** — ส่ง EventBridge events ไป downstream และรองรับ callback ที่ `POST /v1/report-incident` เพื่อ link incident กลับเข้ารายงาน
 
 ### Service Owner
 - **Akawat Moradsatian** (6609681231)
 
+### Current Snapshot
+- ✅ 4 Lambda functions, 3 DynamoDB tables, 1 SQS queue + DLQ, 1 custom EventBridge bus
+- ✅ Frontend มีทั้ง landing page, API dashboard, และ admin verification console
+- ✅ Observability ครบกว่าช่วงต้นโปรเจกต์: `X-Trace-Id`, audit log, recent events, trace lookup, RSS changelog, deprecation metadata
+- ✅ AI resilience รองรับ multi-key rotation + model fallback และถ้า AI ล้มเหลวจะตั้ง `ai_analysis_failed=true` เพื่อให้ manual review ทำงานต่อได้
+- ✅ Media evidence upload ผ่าน S3 presigned URL สูงสุด 20 MB ตาม config ปัจจุบัน
+
 ### Pain Points ที่แก้ไข
-- ⚡ **Information Overload** — รองรับ High Throughput ในสภาวะวิกฤต
-- 🔄 **Noise & Redundancy** — กรอง SPAM และ Duplicate ออกอัตโนมัติ
-- 📝 **Unstructured Data** — Normalize ข้อมูลจากแหล่งต่างๆ ให้เป็นรูปแบบเดียว
+- ⚡ **Information Overload** — write path แยก async ผ่าน SQS เพื่อรองรับ traffic ช่วงวิกฤต
+- 🔄 **Noise & Redundancy** — กรอง spam/duplicate ด้วย rules + AI-assisted analysis
+- 📝 **Unstructured Data** — normalize ข้อมูลจากหลาย source ให้อยู่ใน workflow เดียวกันก่อนส่งต่อ downstream
 
 ## 🏗️ Architecture
 
 ```
-External Client
-      │
-      ▼
-┌─────────────────────────────────────┐
-│         API Gateway (REST)          │
-│   X-Api-Key auth + Usage Plan      │
-│   Rate: 50 req/s, Burst: 100       │
-└───┬──────────┬──────────┬──────────┘
-    │          │          │
-    ▼ POST     ▼ GET/PATCH/DELETE    ▼ GET
-┌────────┐  ┌────────────────┐  ┌──────────┐
-│ Ingest │  │  API Handler   │  │  Health  │
-│Handler │  │   (Lambda)     │  │ Handler  │
-└───┬────┘  └───┬────────┬───┘  └──────────┘
-    │           │        │
-    ▼           ▼        ▼
-┌────────┐  ┌────────┐  ┌────────────┐
-│  SQS   │  │DynamoDB│  │ EventBridge│
-│ Queue  │  │Reports │  │ Custom Bus │
-└───┬────┘  │Audit   │  └────────────┘
-    │       │Stats   │
-    ▼       └────────┘
-┌────────────────────┐
-│ Ingestion Worker   │
-│    (Lambda)        │
-│ ┌──────────────┐   │
-│ │ Gemini AI    │   │
-│ │ Trust Scoring│   │
-│ └──────────────┘   │
-│ ┌──────────────┐   │
-│ │ Dedup Logic  │   │
-│ │ Haversine    │   │
-│ └──────────────┘   │
-└────────────────────┘
+External Client / Dashboard / Admin Verify
+                  │
+                  ▼
+┌─────────────────────────────────────────────────┐
+│              API Gateway (REST /v1)            │
+│  API key required: POST /reports, /upload-url  │
+│  Demo/admin routes: GET/PATCH/DELETE/trace/etc │
+└───────┬───────────────────────┬─────────────────┘
+        │                       │
+        ▼                       ▼
+┌──────────────┐        ┌─────────────────────┐
+│Ingest Handler│        │ API / Health Lambda │
+└──────┬───────┘        └───────┬─────────────┘
+       │                        │
+       ▼                        ├──────────────► DynamoDB (Reports / Audit / Stats)
+┌──────────────┐                ├──────────────► EventBridge
+│ SQS + DLQ    │                ├──────────────► S3 Media (presigned upload URL)
+└──────┬───────┘                └──────────────► CloudWatch Logs / trace lookup
+       │
+       ▼
+┌─────────────────────────────────────────────────┐
+│              Ingestion Worker Lambda           │
+│  - Gemini trust scoring + fallback            │
+│  - Dedup: external_id + geo/time + content    │
+│  - Async processing and report enrichment      │
+└─────────────────────────────────────────────────┘
+
+Static UI: S3 Website hosting `/`, `/dashboard/`, `/admin-verify/`
 ```
 
 ## 🛠️ Tech Stack
@@ -71,20 +73,23 @@ External Client
 | Runtime | Python 3.12 |
 | Compute | AWS Lambda (4 functions) |
 | API | API Gateway (REST) |
-| Database | DynamoDB (3 tables: Reports, AuditLogs, Stats) |
+| Database | DynamoDB (Reports, AuditLogs, Stats) |
 | Queue | SQS + Dead Letter Queue |
 | Events | EventBridge (custom bus) |
-| AI | Google Gemini (gemini-2.0-flash) |
+| AI | Google Gemini with configurable model fallback chain |
+| Storage | S3 Static Website + S3 Media Bucket |
 | IaC | Terraform |
-| Auth | API Key (Usage Plan) |
-| Frontend | S3 Static Website (Landing + Dashboard) |
+| Auth | API Key for ingest and media upload endpoints |
+| Observability | CloudWatch Logs, `X-Trace-Id`, RSS changelog, deprecation metadata |
 
 ## Prerequisites
 
-- AWS Learner Lab — active session with credentials
-- [Terraform](https://www.terraform.io/downloads) ≥ 1.5
+- AWS Learner Lab session with valid credentials
+- [Terraform](https://www.terraform.io/downloads) >= 1.5
 - Python 3.12+
-- Google Gemini API Key ([get one](https://aistudio.google.com/apikey))
+- `pip`
+- At least 1 Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
+- Optional: Incident Service base URL for live validation of `link_to_incident_id`
 
 ## Quick Start
 
@@ -93,54 +98,80 @@ External Client
 git clone <repo-url>
 cd CS366-Serverless-RequestVerifyService
 
-# 2. ตั้งค่า AWS Credentials (จาก Learner Lab)
+# 2. (Optional but recommended) install local dev dependencies
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+
+# 3. Set AWS credentials from Learner Lab
 export AWS_ACCESS_KEY_ID=...
 export AWS_SECRET_ACCESS_KEY=...
 export AWS_SESSION_TOKEN=...
 
-# 3. Deploy ทั้งหมดด้วยคำสั่งเดียว
+# 4. Create .env for deploy.sh
+cat > .env <<'EOF'
+GEMINI_API_KEY1=your-first-gemini-key
+# Optional when verifying and linking to existing incidents
+INCIDENT_SERVICE_BASE_URL=https://incident-service.example/api/v1
+EOF
+
+# 5. Deploy everything
 chmod +x scripts/deploy.sh
 ./scripts/deploy.sh
-#   → ระบบจะถาม Gemini API Key ระหว่าง terraform apply
 
-# 4. ดู API URL + API Key
+# 6. Read important outputs
 cd terraform
-terraform output api_url
+terraform output -raw api_url
 terraform output -raw api_key
+terraform output -raw website_url
+terraform output -raw dashboard_url
+terraform output -raw openapi_spec_url
 ```
+
+### Deploy Notes
+
+- `scripts/deploy.sh` อ่านค่าจาก `.env` หรือ environment variables แล้ว generate `terraform/terraform.tfvars` ให้อัตโนมัติ
+- รองรับ `GEMINI_API_KEY1..N` และ model fallback chain สำหรับ Gemini
+- ถ้าไม่ตั้ง `INCIDENT_SERVICE_BASE_URL` ระบบยังทำงานได้ แต่ verify flow จะไม่สามารถ validate incident reference แบบ live ได้
+- หน้า admin console ใช้ URL เดียวกับ `website_url` แล้วต่อท้าย `/admin-verify/`
 
 ## 📚 API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/v1/reports` | Submit raw report (202 Accepted) |
-| `GET` | `/v1/reports` | List reports with status filter |
-| `GET` | `/v1/reports/{id}` | Get report detail + AI analysis |
-| `PATCH` | `/v1/reports/{id}` | Verify / Reject / Request more info |
-| `DELETE` | `/v1/reports/{id}` | Soft delete a report |
-| `GET` | `/v1/reports/stats` | Aggregated statistics |
-| `GET` | `/v1/health` | System health check |
-| `GET` | `/v1/changelog.xml` | RSS feed for contract/release changes |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/v1/reports` | API Key | Submit raw report for async ingestion (`202 Accepted`) |
+| `POST` | `/v1/reports/upload-url` | API Key | Generate presigned S3 PUT URL for media evidence |
+| `GET` | `/v1/reports` | None | List reports with status, trust score, priority, and limit filters |
+| `GET` | `/v1/reports/{id}` | None | Get full report detail with AI analysis and linked incident info |
+| `PATCH` | `/v1/reports/{id}` | None | Verify, reject, spam, or mark duplicate; optional incident linking when verified |
+| `DELETE` | `/v1/reports/{id}` | None | Soft delete a report with audit reason |
+| `GET` | `/v1/reports/stats` | None | Aggregated statistics, trending keywords, and heatmap data |
+| `GET` | `/v1/reports/audit` | None | Audit log history |
+| `GET` | `/v1/reports/events` | None | Recent EventBridge event mirror from CloudWatch logs |
+| `GET` | `/v1/reports/trace/{trace_id}` | None | Cross-Lambda trace lookup by `X-Trace-Id` |
+| `POST` | `/v1/report-incident` | None | Callback from Incident Tracking Service to link incident result back |
+| `GET` | `/v1/health` | None | Dependency-aware health check |
+| `GET` | `/v1/changelog.xml` | None | RSS feed for release and contract changes |
+| `GET` | `/v1/deprecation-info` | None | Deprecated/sunset endpoint metadata |
 
-### Query Parameters (Important)
+### Query Parameters ที่ใช้บ่อย
 
-- `GET /v1/reports?priority=all|high|normal`
-  - `high` = show only high-priority reports first (trust/severity based)
+- `GET /v1/reports?status=PENDING_REVIEW&priority=high&min_trust_score=80&limit=10`
 - `GET /v1/reports/stats?timeframe=today|last_24h|last_7d&region=bkk|central|north|northeast|south`
-  - `region` is optional and filters summary, trending keywords, and heatmap data
+- `GET /v1/reports/audit?report_id=<report_id>&limit=20`
+- `GET /v1/reports/events?type=all|verified|status-changed&limit=20`
 
 ### Report Status Lifecycle
 
 ```
 RECEIVED → PENDING_REVIEW → VERIFIED
-    │              ↓↗
-    │         NEEDS_MORE_INFO
-    │              ↓
-    ├──→ SPAM     REJECTED
-    └──→ DUPLICATE
-
-ทุกสถานะ → DELETED (Soft delete)
+    │             ├──→ REJECTED
+    │             ├──→ SPAM
+    │             └──→ DUPLICATE
+    └──────────────────────────────► DELETED
 ```
+
+ถ้า downstream Incident Tracking Service สร้าง incident สำเร็จ callback ที่ `POST /v1/report-incident` จะเติม `linked_incident_id` และเขียน audit log เพิ่มให้อัตโนมัติ
 
 ### Example — Submit a report
 
@@ -160,13 +191,30 @@ curl -X POST "$API_URL/reports" \
 ```
 
 Response:
+
 ```json
 {
   "status": "QUEUED",
-  "report_id": "r-550e8400-e29b-...",
-  "message": "Report accepted and queued for processing."
+  "report_id": "r-550e8400e29b",
+  "message": "Report accepted and queued for processing.",
+  "estimated_wait_time": "2s",
+  "traceId": "2c4f7f1d-..."
 }
 ```
+
+### Example — Media Upload Flow
+
+1. Call `POST /v1/reports/upload-url` with `filename`, `content_type`, and optional `report_id` / `file_size_bytes`
+2. `PUT` the file body to the returned `upload_url`
+3. Include returned `media_url` in `POST /v1/reports` under `media_urls`
+
+## 🖥️ Frontend
+
+| Page | Path | Purpose |
+|------|------|---------|
+| Landing Page | `/` | Project overview and entry point |
+| Dashboard | `/dashboard/` | API tester for health, reports, stats, events, upload URL, and trace lookup |
+| Admin Verify | `/admin-verify/` | Pending report queue, detailed review, verify/reject/delete actions, audit trail, and incident linking |
 
 ## 🧪 Testing
 
@@ -174,57 +222,89 @@ Response:
 # Install dev dependencies
 pip install -r requirements-dev.txt
 
-# Run unit + integration tests (no AWS needed)
+# Run unit + integration tests
 pytest tests/unit/ tests/integration/ -v
 
 # Run with coverage
 pytest tests/unit/ tests/integration/ --cov=src --cov-report=term-missing
 
-# Run E2E tests (requires deployed API)
+# Run E2E tests against deployed API
 API_URL=https://xxx.execute-api.../dev API_KEY=xxx pytest tests/e2e/ -v
 ```
 
 ### Test Coverage
-- **Unit Tests**: Validators, Gemini Service, Dedup Service, API Handler
-- **Integration Tests**: DynamoDB CRUD, SQS flow, EventBridge publish
-- **E2E Tests**: Full API contract validation, Ingest flow, Verify flow
+
+- **Unit Tests**: config, validators, ingest handler, ingestion worker, API handler, Gemini service, dedup service
+- **Integration Tests**: DynamoDB operations, SQS flow, EventBridge publish
+- **E2E Tests**: API contract validation, ingest flow, verify flow
+- `pytest` ถูกตั้งค่าไว้ใน `pyproject.toml` และ E2E จะ auto-skip ถ้าไม่ได้ตั้ง `API_URL`
 
 ## 📁 Project Structure
 
-```
+```text
 src/
-├── config.py                 # Environment config singleton
+├── config.py                 # Environment and feature flags
 ├── models/
-│   ├── enums.py              # ValidationStatus, SourcePlatform, IncidentCategory
+│   ├── enums.py              # ValidationStatus, SourcePlatform, IncidentType, etc.
 │   └── report.py             # Report, GeoLocation, AuditLog dataclasses
 ├── utils/
 │   ├── logger.py             # Structured JSON logging
-│   ├── response.py           # API Gateway response builders
-│   └── validators.py         # Request validation + state machine
+│   ├── response.py           # API Gateway response helpers + trace/deprecation headers
+│   └── validators.py         # Payload and state transition validation
 ├── services/
-│   ├── gemini_service.py     # Google Gemini AI trust scoring
-│   ├── dedup_service.py      # Deduplication (Haversine + time window)
+│   ├── gemini_service.py     # Gemini integration, key rotation, model fallback
+│   ├── dedup_service.py      # External ID, geo/time, and content similarity dedup
+│   ├── geocoding_service.py  # Reverse geocoding enrichment
 │   ├── audit_service.py      # Audit log writer
 │   └── event_publisher.py    # EventBridge publisher
 └── handlers/
-    ├── ingest_handler.py     # POST /reports → SQS
-    ├── ingestion_worker.py   # SQS → Process → DynamoDB
-    ├── api_handler.py        # GET/PATCH/DELETE /reports
+    ├── ingest_handler.py     # POST /reports -> DynamoDB placeholder -> SQS
+    ├── ingestion_worker.py   # SQS -> AI/dedup/process -> DynamoDB
+    ├── api_handler.py        # Report read/review/admin/trace/callback endpoints
     └── health_handler.py     # GET /health
 
-terraform/                    # All infrastructure-as-code (12 .tf files)
 frontend/
-├── index.html                # Landing page (/)
-└── dashboard/
-    └── index.html            # API Testing Dashboard (/dashboard/)
+├── index.html                # Landing page
+├── dashboard/
+│   └── index.html            # API testing dashboard
+└── admin-verify/
+    └── index.html            # Admin verification console
+
+terraform/                    # Infrastructure as code and outputs
 scripts/                      # deploy.sh, destroy.sh, seed_data.py
-tests/
-├── unit/                     # Pure logic tests (mocked)
-├── integration/              # AWS-mocked tests (moto)
-└── e2e/                      # Live API tests (httpx)
-docs/                         # Service Proposal & Implementation docs
-plan/                         # Original implementation plan
+tests/                        # unit, integration, e2e suites
+docs/                         # OpenAPI, phase notes, versioning policy, implementation docs
+plan/                         # Original project planning documents
 ```
+
+## 🔄 EventBridge Events
+
+| Event | Description | Consumer |
+|-------|-------------|----------|
+| `ReportVerifiedEvent` | Fired after verification with `schemaVersion`, action, suggested incident data, severity, reporter count, location, media evidence, and optional address text | Incident Tracking Service and downstream consumers |
+| `ReportStatusChangedEvent` | Fired on status transitions with `schemaVersion`, old/new status, actor, reason, and timestamp | Dashboard, Notification, and monitoring consumers |
+
+## 📖 Documentation
+
+| Document | Description |
+|----------|-------------|
+| [📋 Implementation Plan](docs/implement/implementation-plan.md) | Phase-based implementation snapshot from March 2026; useful as historical context but not the latest source of truth |
+| [🧩 OpenAPI 3.0 Spec](docs/openapi/openapi.json) | Machine-readable contract for the primary REST endpoints |
+| [🗂️ Versioning Policy](docs/VERSIONING_POLICY.md) | REST and event versioning/deprecation policy |
+| [🎤 Demo Scope Mapping](docs/phase2/demoday.md) | อธิบายว่า service นี้อยู่ตรงไหนใน simulator และ integration flow |
+| [🔗 Integration Guide](docs/implement/integration-guide.md) | คู่มือ integration กับ services อื่น |
+| [📄 Service Proposal (PDF)](docs/Service%20Proposal%206609681231%20WordVer2.pdf) | Proposal ฉบับเต็ม |
+| [📝 Service Proposal (Text)](docs/others/reportingestion_proposal.txt) | Proposal แบบ text |
+| [🔧 Original Plan](plan/implementation-plan.md) | แผน implementation ฉบับตั้งต้น |
+
+## 🚀 หลังเดโม ถ้าจะปรับต่อ
+
+- **ปิดช่องโหว่ด้าน auth/admin flow**: แยก public ingest ออกจาก admin/reviewer/trace/callback endpoints และใส่ RBAC หรือ Lambda authorizer ให้ชัดเจน
+- **รวม contract ให้เหลือ source of truth เดียว**: ขยาย OpenAPI ให้ครอบคลุม `audit`, `events`, `trace`, `deprecation-info`, และ `report-incident` ด้วย เพื่อลด drift ระหว่าง docs กับ code
+- **ทำ operational hardening จริงจัง**: เพิ่ม CloudWatch dashboard, alarms, DLQ redrive workflow, load testing, และ retry/outbox strategy สำหรับ downstream event delivery
+- **เก็บ repo ให้ production-friendly กว่าเดโม**: เพิ่ม `.env.example`, เอา generated artifacts/state ออกจาก version control, และใส่ CI สำหรับ test + lint + docs checks
+- **ยกระดับ data quality loop**: ใช้ reviewer feedback ย้อนกลับไปปรับ scoring, เพิ่ม multilingual similarity/dedup, และทำ source reputation/history ให้มีน้ำหนักมากขึ้น
+- **เพิ่ม staging/integration ergonomics**: มี test environment, custom domain, และ callback contract testing กับ Incident Service แบบอัตโนมัติ
 
 ## 🗑️ Tear Down
 
@@ -232,45 +312,17 @@ plan/                         # Original implementation plan
 ./scripts/destroy.sh
 ```
 
-## 🔄 EventBridge Events
-
-| Event | Description | Consumer |
-|-------|-------------|----------|
-| `ReportVerifiedEvent` | เมื่อรายงานได้รับการยืนยัน | Incident Tracking Service |
-| `ReportStatusChangedEvent` | เมื่อสถานะเปลี่ยน | Dashboard, Notification Services |
-
-## 📖 Documentation
-
-| Document | Description |
-|----------|-------------|
-| [📋 Implementation Plan](docs/implement/implementation-plan.md) | **แผนการ Implement ตาม Phase พร้อมสรุปสิ่งที่ทำเสร็จ/ยังขาด** |
-| [📄 Service Proposal (PDF)](docs/Service%20Proposal%206609681231%20WordVer2.pdf) | เอกสาร Proposal ฉบับเต็ม |
-| [📝 Service Proposal (Text)](docs/others/reportingestion_proposal.txt) | เอกสาร Proposal รูปแบบ Text |
-| [🧩 OpenAPI 3.0 Spec](docs/openapi/openapi.json) | Machine-readable API contract (used by dashboard) |
-| [🔧 Original Plan](plan/implementation-plan.md) | แผนการ Implement ต้นฉบับ |
-| [🔗 Integration Guide](docs/implement/integration-guide.md) | คู่มือ Integration กับ Services อื่น |
-
-## 📊 Implementation Status
-
-| Phase | Status | Completion |
-|-------|--------|------------|
-| Phase 1: Foundation & Infrastructure | ✅ Complete | 100% |
-| Phase 2: Core Business Logic | ✅ Complete | ~95% |
-| Phase 3: Integration & Enhancement | ✅ Complete | ~90% |
-
-> ดูรายละเอียดเพิ่มเติมได้ที่ [Implementation Plan](docs/implement/implementation-plan.md)
-
 ## 🤝 Related Services
 
 | Service | Interaction |
 |---------|-------------|
-| **Incident Tracking Service** | รับ ReportVerifiedEvent เพื่อสร้าง Incident |
-| **Rescue Request Service** | รับ Event เฉพาะ severity=CRITICAL |
-| **Operation Update Service** | เรียก GET /stats สำหรับ Dashboard |
-| **Disaster Monitoring Service** | ส่ง POST /reports จาก IoT Sensors |
+| **Incident Tracking Service** | รับ `ReportVerifiedEvent` เพื่อสร้างหรือ merge incident และ callback กลับที่ `POST /v1/report-incident` |
+| **Rescue Request Service** | ใช้ verified events ที่มี severity สูงเป็น trigger หรือ context |
+| **Operation Update Service** | เรียก `GET /v1/reports/stats` สำหรับ dashboard/summary |
+| **Disaster Monitoring Service** | ส่ง `POST /v1/reports` จาก sensor หรือ field updates |
 
 ---
 
 **Service Owner**: Akawat Moradsatian (6609681231)  
 **Course**: CS366 — Serverless Computing  
-**Version**: 1.0.0
+**API Version**: `/v1`
