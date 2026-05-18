@@ -53,6 +53,11 @@ output "dashboard_url" {
   value       = "http://${aws_s3_bucket_website_configuration.website.website_endpoint}/dashboard/"
 }
 
+output "openapi_spec_url" {
+  description = "OpenAPI 3.0 spec URL (static website)"
+  value       = "http://${aws_s3_bucket_website_configuration.website.website_endpoint}/openapi.json"
+}
+
 output "website_bucket" {
   description = "S3 Website bucket name"
   value       = aws_s3_bucket.website.id
@@ -76,6 +81,8 @@ output "endpoints" {
     audit       = "GET    ${aws_api_gateway_stage.dev.invoke_url}/v1/reports/audit"
     events      = "GET    ${aws_api_gateway_stage.dev.invoke_url}/v1/reports/events"
     upload_url  = "POST   ${aws_api_gateway_stage.dev.invoke_url}/v1/reports/upload-url"
+    changelog   = "GET    ${aws_api_gateway_stage.dev.invoke_url}/v1/changelog.xml"
+    openapi     = "http://${aws_s3_bucket_website_configuration.website.website_endpoint}/openapi.json"
     website     = "http://${aws_s3_bucket_website_configuration.website.website_endpoint}"
     dashboard   = "http://${aws_s3_bucket_website_configuration.website.website_endpoint}/dashboard/"
   }

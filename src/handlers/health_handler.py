@@ -12,6 +12,7 @@ Returns overall status: healthy / degraded / unhealthy
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 import boto3
@@ -37,17 +38,17 @@ def handler(event: dict, context) -> dict:
     components: dict[str, dict] = {}
     overall = "healthy"
 
-    # --- 1. DynamoDB ---
-    components["dynamodb"] = _check_dynamodb()
-
-    # --- 2. SQS ---
-    components["sqs"] = _check_sqs()
-
-    # --- 3. Gemini AI ---
-    components["gemini"] = _check_gemini()
-
-    # --- 4. EventBridge ---
-    components["eventbridge"] = _check_eventbridge()
+    # --- Run all checks concurrently ---
+    checks = {
+        "dynamodb": _check_dynamodb,
+        "sqs": _check_sqs,
+        "gemini": _check_gemini,
+        "eventbridge": _check_eventbridge,
+    }
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(fn): name for name, fn in checks.items()}
+        for future in as_completed(futures):
+            components[futures[future]] = future.result()
 
     # --- Determine overall status ---
     statuses = [c.get("status") for c in components.values()]

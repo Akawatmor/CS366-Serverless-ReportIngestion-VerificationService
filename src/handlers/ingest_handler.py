@@ -15,11 +15,62 @@ from datetime import datetime, timezone
 import boto3
 
 from src.config import config
+from src.models.report import GeoLocation, Report
 from src.utils.logger import get_logger
 from src.utils import response
 from src.utils.validators import validate_ingest_payload
 
 logger = get_logger(__name__)
+
+
+def _build_sensor_summary(sensor_data: dict) -> str:
+    """Create readable fallback text for structured sensor alerts."""
+    metric_name = str(sensor_data.get("metric_name") or "sensor metric")
+    metric_value = sensor_data.get("metric_value")
+    unit = str(sensor_data.get("unit") or "").strip()
+    threshold = sensor_data.get("threshold")
+    sensor_id = str(sensor_data.get("sensor_id") or "").strip()
+    site_id = str(sensor_data.get("site_id") or "").strip()
+    status = str(sensor_data.get("status") or "").strip()
+
+    value_text = f"{metric_value} {unit}".strip() if metric_value is not None else "unknown"
+    parts = [f"Sensor alert for {metric_name}: {value_text}"]
+    if threshold is not None:
+        parts.append(f"threshold {threshold}")
+    if status:
+        parts.append(f"status {status}")
+    if sensor_id:
+        parts.append(f"sensor {sensor_id}")
+    if site_id:
+        parts.append(f"site {site_id}")
+    return ", ".join(parts)
+
+
+def _build_placeholder_report(
+    report_id: str,
+    body: dict,
+    raw_content: str,
+    ingested_at: str,
+    event_timestamp: str,
+) -> Report:
+    """Create the placeholder report persisted before async AI processing starts."""
+    geo = body.get("geo_location") or {}
+    geo_location = None
+    if geo.get("lat") is not None and geo.get("lon") is not None:
+        geo_location = GeoLocation(lat=float(geo["lat"]), lon=float(geo["lon"]))
+
+    return Report(
+        report_id=report_id,
+        source_platform=body["reporter_source"],
+        source_external_id=body.get("source_external_id"),
+        reporter_id=body["reporter_id"],
+        raw_content=raw_content,
+        media_urls=body.get("media_urls", []),
+        sensor_data=body.get("sensor_data"),
+        geo_location=geo_location,
+        event_timestamp=event_timestamp,
+        ingested_at=ingested_at,
+    )
 
 
 def handler(event: dict, context) -> dict:
@@ -63,17 +114,49 @@ def handler(event: dict, context) -> dict:
     report_id = f"r-{uuid.uuid4().hex[:12]}"
 
     # --- Build SQS message ---
+    sensor_data = body.get("sensor_data")
+    raw_content = body.get("raw_content", "")
+    if not raw_content and isinstance(sensor_data, dict) and sensor_data:
+        raw_content = _build_sensor_summary(sensor_data)
+
+    ingested_at = datetime.now(timezone.utc).isoformat()
+    event_timestamp = body.get("timestamp", ingested_at)
+
     sqs_message = {
         "report_id": report_id,
         "reporter_source": body["reporter_source"],
         "reporter_id": body["reporter_id"],
-        "raw_content": body.get("raw_content", ""),
+        "raw_content": raw_content,
         "media_urls": body.get("media_urls", []),
+        "sensor_data": sensor_data,
         "geo_location": body.get("geo_location"),
-        "timestamp": body.get("timestamp", datetime.now(timezone.utc).isoformat()),
+        "timestamp": event_timestamp,
         "source_external_id": body.get("source_external_id"),
-        "ingested_at": datetime.now(timezone.utc).isoformat(),
+        "ingested_at": ingested_at,
     }
+
+    # --- Persist placeholder report before async analysis ---
+    dynamodb = boto3.client("dynamodb", region_name=config.AWS_REGION)
+    placeholder_report = _build_placeholder_report(
+        report_id=report_id,
+        body=body,
+        raw_content=raw_content,
+        ingested_at=ingested_at,
+        event_timestamp=event_timestamp,
+    )
+
+    try:
+        dynamodb.put_item(
+            TableName=config.REPORTS_TABLE,
+            Item=placeholder_report.to_dynamodb_item(),
+            ConditionExpression="attribute_not_exists(report_id)",
+        )
+    except Exception as e:
+        logger.error("Failed to persist queued report", extra={
+            "request_id": request_id,
+            "data": {"error": str(e), "report_id": report_id},
+        })
+        return response.internal_error("Failed to create report record.", trace_id=request_id)
 
     # --- Send to SQS ---
     try:
@@ -93,6 +176,21 @@ def handler(event: dict, context) -> dict:
             "request_id": request_id,
             "data": {"error": str(e), "report_id": report_id},
         })
+
+        try:
+            dynamodb.delete_item(
+                TableName=config.REPORTS_TABLE,
+                Key={"report_id": {"S": report_id}},
+            )
+        except Exception as cleanup_error:
+            logger.error("Failed to delete queued placeholder report", extra={
+                "request_id": request_id,
+                "data": {
+                    "error": str(cleanup_error),
+                    "report_id": report_id,
+                },
+            })
+
         return response.internal_error("Failed to queue report for processing.", trace_id=request_id)
 
     duration_ms = int((time.time() - start) * 1000)

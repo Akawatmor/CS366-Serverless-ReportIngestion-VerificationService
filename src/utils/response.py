@@ -34,18 +34,55 @@ def _build_headers(trace_id: str | None = None, deprecated: bool = False, sunset
 CORS_HEADERS = _build_headers()
 
 
-def success(body: Any, status_code: int = 200, trace_id: str | None = None) -> dict:
+def success(
+    body: Any,
+    status_code: int = 200,
+    trace_id: str | None = None,
+    deprecated: bool = False,
+    sunset_date: str | None = None,
+) -> dict:
     """Return a successful API Gateway response."""
     return {
         "statusCode": status_code,
-        "headers": _build_headers(trace_id),
+        "headers": _build_headers(trace_id, deprecated=deprecated, sunset_date=sunset_date),
         "body": json.dumps(body, ensure_ascii=False, default=str),
     }
 
 
-def accepted(body: Any, trace_id: str | None = None) -> dict:
+def raw(
+    body: str,
+    status_code: int = 200,
+    content_type: str = "text/plain; charset=utf-8",
+    trace_id: str | None = None,
+) -> dict:
+    """Return a raw (non-JSON) API Gateway response."""
+    headers = _build_headers(trace_id)
+    headers["Content-Type"] = content_type
+    return {
+        "statusCode": status_code,
+        "headers": headers,
+        "body": body,
+    }
+
+
+def xml(body: str, status_code: int = 200, trace_id: str | None = None) -> dict:
+    """Return an XML API Gateway response."""
+    return raw(
+        body=body,
+        status_code=status_code,
+        content_type="application/rss+xml; charset=utf-8",
+        trace_id=trace_id,
+    )
+
+
+def accepted(
+    body: Any,
+    trace_id: str | None = None,
+    deprecated: bool = False,
+    sunset_date: str | None = None,
+) -> dict:
     """202 Accepted — used for async ingestion."""
-    return success(body, status_code=202, trace_id=trace_id)
+    return success(body, status_code=202, trace_id=trace_id, deprecated=deprecated, sunset_date=sunset_date)
 
 
 def error(

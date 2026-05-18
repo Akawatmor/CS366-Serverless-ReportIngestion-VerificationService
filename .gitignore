@@ -45,6 +45,11 @@ Thumbs.db
 .env
 .env.*
 terraform.tfvars
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+**/tfplan
 
 # Test / Coverage
 htmlcov/

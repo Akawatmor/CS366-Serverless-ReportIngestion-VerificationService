@@ -2,7 +2,15 @@
 Unit tests for src/services/dedup_service.py
 """
 import pytest
-from src.services.dedup_service import _haversine_meters, _within_time_window
+from unittest.mock import MagicMock
+
+from src.services.dedup_service import DedupService
+from src.services.dedup_service import (
+    _haversine_meters,
+    _within_time_window,
+    _normalize_tokens,
+    _jaccard_similarity,
+)
 
 
 class TestHaversine:
@@ -61,3 +69,39 @@ class TestTimeWindow:
             "2026-02-18T07:35:00+00:00",
             15,
         ) is True
+
+
+class TestContentSimilarity:
+    """Tests for text normalization and Jaccard similarity."""
+
+    def test_normalize_tokens_handles_thai_and_english(self):
+        tokens = _normalize_tokens("ไฟไหม้อาคารใหญ่ มี smoke หนามาก")
+        assert len(tokens) > 0
+        assert any("smoke" in t for t in tokens)
+
+    def test_jaccard_similarity_high_for_near_duplicate(self):
+        a = _normalize_tokens("Major fire near market with heavy smoke")
+        b = _normalize_tokens("Heavy smoke from major fire near the market")
+        sim = _jaccard_similarity(a, b)
+        assert sim > 0.45
+
+    def test_jaccard_similarity_low_for_unrelated_reports(self):
+        a = _normalize_tokens("Flooding in river district and homes evacuated")
+        b = _normalize_tokens("Road accident with minor injuries on highway")
+        sim = _jaccard_similarity(a, b)
+        assert sim < 0.4
+
+
+class TestDedupServiceExclusions:
+    """Tests for excluding the current report from dedup checks."""
+
+    def test_check_external_id_ignores_current_report(self):
+        mock_db = MagicMock()
+        mock_db.query.return_value = {
+            "Items": [{"report_id": {"S": "r-self"}}],
+        }
+
+        service = DedupService(dynamodb_client=mock_db)
+        existing_id = service.check_external_id("tweet-123", exclude_report_id="r-self")
+
+        assert existing_id is None

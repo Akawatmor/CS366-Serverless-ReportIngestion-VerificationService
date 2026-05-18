@@ -27,22 +27,23 @@ class TestGeminiService:
     def test_fallback_result_structure(self):
         """Fallback result should have all required fields."""
         result = GeminiService._fallback_result()
-        assert result["trust_score"] == 50
+        assert result["content_score"] == 15
         assert result["suggested_category"] == "OTHER"
         assert isinstance(result["keywords"], list)
         assert result["ai_analysis_failed"] is True
         assert result["is_spam_likely"] is False
-        assert "reasoning" in result
+        assert "content_score_reasoning" in result
 
     @patch("src.services.gemini_service.genai", create=True)
     def test_analyze_report_success(self, mock_genai):
         """Successful Gemini analysis should return parsed JSON."""
         mock_response = MagicMock()
         mock_response.text = json.dumps({
-            "trust_score": 85,
+            "content_score": 25,
+            "content_score_reasoning": "Street name and timeline present",
             "suggested_category": "FIRE",
             "keywords": ["fire", "smoke", "urgent"],
-            "reasoning": "Multiple indicators of fire detected",
+            "spam_signals": [],
             "is_spam_likely": False,
         })
 
@@ -57,7 +58,7 @@ class TestGeminiService:
             timestamp="2026-02-18T14:30:00Z",
         )
 
-        assert result["trust_score"] == 85
+        assert result["content_score"] == 25
         assert result["suggested_category"] == "FIRE"
         assert "fire" in result["keywords"]
         assert result["ai_analysis_failed"] is False
@@ -70,7 +71,7 @@ class TestGeminiService:
 
         result = self.service.analyze_report(content="Test content")
 
-        assert result["trust_score"] == 50
+        assert result["content_score"] == 15
         assert result["ai_analysis_failed"] is True
 
     def test_analyze_report_invalid_json_returns_fallback(self):
@@ -79,28 +80,59 @@ class TestGeminiService:
 
         result = self.service.analyze_report(content="Test content")
 
-        assert result["trust_score"] == 50
+        assert result["content_score"] == 15
         assert result["ai_analysis_failed"] is True
 
-    def test_health_check_success(self):
+    def test_iot_source_uses_sensor_prompt(self):
+        """IOT sensor reports should use the sensor-specific prompt branch."""
+        self.service._call_gemini = MagicMock(return_value=json.dumps({
+            "content_score": 23,
+            "content_score_reasoning": "Points awarded for site id, timestamp, and threshold breach.",
+            "suggested_category": "FLOOD",
+            "keywords": ["water_level", "threshold_breach"],
+            "spam_signals": [],
+            "is_spam_likely": False,
+        }))
+
+        result = self.service.analyze_report(
+            content="",
+            source="IOT_SENSOR",
+            reporter_id="sensor-station-01",
+            timestamp="2026-02-18T14:30:00Z",
+            sensor_data={
+                "sensor_id": "wl-01",
+                "site_id": "pier-03",
+                "metric_name": "water_level",
+                "metric_value": 2.8,
+                "unit": "m",
+                "threshold": 2.0,
+                "status": "CRITICAL",
+            },
+        )
+
+        prompt = self.service._call_gemini.call_args.args[0]
+        assert "machine-generated alert" in prompt
+        assert "metric, unit, threshold, anomaly, or status" in prompt
+        assert "damage or number of people affected" not in prompt
+        assert "water_level" in prompt
+        assert "2.8" in prompt
+        assert result["content_score"] == 23
+
+    @patch("urllib.request.urlopen")
+    def test_health_check_success(self, mock_urlopen):
         """Health check returns healthy when API responds."""
-        mock_client = MagicMock()
         mock_response = MagicMock()
-        mock_response.text = "OK"
-        mock_client.generate_content.return_value = mock_response
-        self.service._get_client = MagicMock(return_value=mock_client)
+        mock_response.read.return_value = b'{"models": []}'
+        mock_urlopen.return_value.__enter__.return_value = mock_response
 
         result = self.service.health_check()
         assert result["status"] == "healthy"
         assert "model" in result
         assert "available_keys" in result
 
-    def test_health_check_failure(self):
+    @patch("urllib.request.urlopen", side_effect=Exception("Connection error"))
+    def test_health_check_failure(self, _mock_urlopen):
         """Health check returns unhealthy when API fails."""
-        mock_client = MagicMock()
-        mock_client.generate_content.side_effect = Exception("Connection error")
-        self.service._get_client = MagicMock(return_value=mock_client)
-
         result = self.service.health_check()
         assert result["status"] == "unhealthy"
 
@@ -162,4 +194,4 @@ class TestGeminiService:
             mock_config.GEMINI_API_KEY = ""
             result = self.service.analyze_report(content="test")
         assert result["ai_analysis_failed"] is True
-        assert result["trust_score"] == 50
+        assert result["content_score"] == 15

@@ -230,6 +230,31 @@ resource "aws_api_gateway_integration" "delete_report" {
 }
 
 # ==========================
+# /v1/report-incident  (callback from Incident Tracking Service)
+# ==========================
+resource "aws_api_gateway_resource" "report_incident" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  parent_id   = aws_api_gateway_resource.v1.id
+  path_part   = "report-incident"
+}
+
+resource "aws_api_gateway_method" "post_report_incident" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_resource.report_incident.id
+  http_method   = "POST"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "post_report_incident" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_resource.report_incident.id
+  http_method             = aws_api_gateway_method.post_report_incident.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_handler.invoke_arn
+}
+
+# ==========================
 # /v1/health
 # ==========================
 resource "aws_api_gateway_resource" "health" {
@@ -252,6 +277,87 @@ resource "aws_api_gateway_integration" "get_health" {
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
   uri                     = aws_lambda_function.health_handler.invoke_arn
+}
+
+# ==========================
+# /v1/changelog.xml
+# ==========================
+resource "aws_api_gateway_resource" "changelog_xml" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  parent_id   = aws_api_gateway_resource.v1.id
+  path_part   = "changelog.xml"
+}
+
+resource "aws_api_gateway_method" "get_changelog_xml" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_resource.changelog_xml.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "get_changelog_xml" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_resource.changelog_xml.id
+  http_method             = aws_api_gateway_method.get_changelog_xml.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_handler.invoke_arn
+}
+
+# ==========================
+# /v1/deprecation-info
+# ==========================
+resource "aws_api_gateway_resource" "deprecation_info" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  parent_id   = aws_api_gateway_resource.v1.id
+  path_part   = "deprecation-info"
+}
+
+resource "aws_api_gateway_method" "get_deprecation_info" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_resource.deprecation_info.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "get_deprecation_info" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_resource.deprecation_info.id
+  http_method             = aws_api_gateway_method.get_deprecation_info.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_handler.invoke_arn
+}
+
+# ==========================
+# /v1/reports/trace/{trace_id}
+# ==========================
+resource "aws_api_gateway_resource" "reports_trace" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  parent_id   = aws_api_gateway_resource.reports.id
+  path_part   = "trace"
+}
+
+resource "aws_api_gateway_resource" "reports_trace_id" {
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  parent_id   = aws_api_gateway_resource.reports_trace.id
+  path_part   = "{trace_id}"
+}
+
+resource "aws_api_gateway_method" "get_trace" {
+  rest_api_id   = aws_api_gateway_rest_api.api.id
+  resource_id   = aws_api_gateway_resource.reports_trace_id.id
+  http_method   = "GET"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "get_trace" {
+  rest_api_id             = aws_api_gateway_rest_api.api.id
+  resource_id             = aws_api_gateway_resource.reports_trace_id.id
+  http_method             = aws_api_gateway_method.get_trace.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_handler.invoke_arn
 }
 
 # ==========================
@@ -281,6 +387,12 @@ module "cors_health" {
   resource_id = aws_api_gateway_resource.health.id
 }
 
+module "cors_changelog" {
+  source      = "./modules/cors"
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.changelog_xml.id
+}
+
 module "cors_audit" {
   source      = "./modules/cors"
   rest_api_id = aws_api_gateway_rest_api.api.id
@@ -299,6 +411,24 @@ module "cors_upload_url" {
   resource_id = aws_api_gateway_resource.reports_upload_url.id
 }
 
+module "cors_deprecation_info" {
+  source      = "./modules/cors"
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.deprecation_info.id
+}
+
+module "cors_trace" {
+  source      = "./modules/cors"
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.reports_trace_id.id
+}
+
+module "cors_report_incident" {
+  source      = "./modules/cors"
+  rest_api_id = aws_api_gateway_rest_api.api.id
+  resource_id = aws_api_gateway_resource.report_incident.id
+}
+
 # ==========================
 # Deployment + Stage
 # ==========================
@@ -314,6 +444,10 @@ resource "aws_api_gateway_deployment" "api" {
       aws_api_gateway_resource.reports_upload_url.id,
       aws_api_gateway_resource.report_by_id.id,
       aws_api_gateway_resource.health.id,
+      aws_api_gateway_resource.changelog_xml.id,
+      aws_api_gateway_resource.deprecation_info.id,
+      aws_api_gateway_resource.reports_trace_id.id,
+      aws_api_gateway_resource.report_incident.id,
       aws_api_gateway_method.post_reports.id,
       aws_api_gateway_method.get_reports.id,
       aws_api_gateway_method.get_stats.id,
@@ -324,6 +458,10 @@ resource "aws_api_gateway_deployment" "api" {
       aws_api_gateway_method.patch_report.id,
       aws_api_gateway_method.delete_report.id,
       aws_api_gateway_method.get_health.id,
+      aws_api_gateway_method.get_changelog_xml.id,
+      aws_api_gateway_method.get_deprecation_info.id,
+      aws_api_gateway_method.get_trace.id,
+      aws_api_gateway_method.post_report_incident.id,
     ]))
   }
 
@@ -338,13 +476,21 @@ resource "aws_api_gateway_deployment" "api" {
     aws_api_gateway_integration.patch_report,
     aws_api_gateway_integration.delete_report,
     aws_api_gateway_integration.get_health,
+    aws_api_gateway_integration.get_changelog_xml,
+    aws_api_gateway_integration.get_deprecation_info,
+    aws_api_gateway_integration.get_trace,
+    aws_api_gateway_integration.post_report_incident,
     module.cors_reports,
     module.cors_report_by_id,
     module.cors_stats,
     module.cors_health,
+    module.cors_changelog,
     module.cors_audit,
     module.cors_events,
     module.cors_upload_url,
+    module.cors_deprecation_info,
+    module.cors_trace,
+    module.cors_report_incident,
   ]
 
   lifecycle {

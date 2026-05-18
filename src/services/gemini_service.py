@@ -2,12 +2,12 @@
 Gemini AI Service — calls Google Gemini API for Trust Scoring.
 
 Features:
-  - Multi API key rotation: cycles through GEMINI_API_KEY1..10
-    When a key gets 429 (rate limited), automatically rotates to the next key.
-  - Model fallback chain: tries gemini-2.5-flash-lite first, then
-    gemini-2.0-flash, then gemini-3.1-flash-lite.
-  - Graceful degradation: if all keys/models fail, returns fallback values.
-  - Vision support: can analyze images from S3 URLs.
+    - Multi API key rotation: cycles through GEMINI_API_KEY1..10
+        When a key gets 429 (rate limited), automatically rotates to the next key.
+    - Model fallback chain: tries the configured model order from GEMINI_MODEL_FALLBACKS
+        or GEMINI_MODEL1..N.
+    - Graceful degradation: if all keys/models fail, returns fallback values.
+    - Vision support: can analyze images from S3 URLs.
 """
 from __future__ import annotations
 
@@ -25,7 +25,8 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 # Prompt template for Gemini (text-only)
-ANALYSIS_PROMPT = """You are a disaster report verification AI. Analyze the following raw disaster report and provide a trust assessment.
+# Gemini evaluates ONLY content quality (0-30). Trust score is assembled in Python.
+ANALYSIS_PROMPT = """You are a disaster report verification AI. Evaluate the CONTENT QUALITY of this report.
 
 **Report Content:**
 {content}
@@ -37,29 +38,85 @@ ANALYSIS_PROMPT = """You are a disaster report verification AI. Analyze the foll
 
 **Attached Media URLs:** {media_urls}
 
-**Reporter History:**
+**Reporter History (context only — do NOT factor into content_score):**
 {reporter_history}
 
-**Instructions:**
-1. Evaluate the credibility of this report on a scale of 0-100 (trust_score).
-   - Consider the reporter's past history: repeated spam submissions lower trust; a track record of verified reports increases trust.
-   - If media evidence URLs are attached, acknowledge their presence (higher trust if photos/video are included).
-2. Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
-3. Extract important keywords (Thai or English).
-4. Provide a brief reasoning for your trust score, including how reporter history and media affected your decision.
-5. Detect if this looks like spam, fake news, or a duplicate pattern. Consider repeat offenders.
+**Your task — score ONLY the content quality on a scale of 0–30:**
+
+| Criterion | Points |
+|---|---|
+| Specifies exact location (street name / neighbourhood / coordinates) | +10 |
+| Specifies time or timeline of the event | +8 |
+| Describes damage or number of people affected | +7 |
+| Uses factual language (not panic-driven / exaggerated) | +5 |
+
+Do NOT award points for: reporter history, media attachments, or source platform — those are scored separately by the system.
+
+**Also:**
+- Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
+- Extract important keywords (Thai or English).
+- List any spam signals detected (repetitive phrasing, vague location, exaggerated claims, etc.).
+- Decide if this looks like spam or fake news.
 
 **Respond ONLY with valid JSON in this exact format:**
 {{
-  "trust_score": <int 0-100>,
+  "content_score": <int 0-30>,
+  "content_score_reasoning": "<brief explanation of points awarded>",
   "suggested_category": "<string>",
   "keywords": ["<string>", ...],
-  "reasoning": "<string>",
+  "spam_signals": ["<string>", ...],
   "is_spam_likely": <boolean>
 }}"""
 
+IOT_ANALYSIS_PROMPT = """You are a disaster sensor alert verification AI. Evaluate ONLY the content quality of this machine-generated alert.
+
+**Sensor Alert Text:**
+{content}
+
+**Reporter Source:** {source}
+**Reporter ID:** {reporter_id}
+**Location (lat, lon):** {lat}, {lon}
+**Reported Time:** {timestamp}
+
+**Structured Sensor Data:**
+{sensor_data}
+
+**Attached Media URLs:** {media_urls}
+
+**Reporter History (context only — do NOT factor into content_score):**
+{reporter_history}
+
+**Your task — score ONLY the content quality on a scale of 0–30:**
+
+| Criterion | Points |
+|---|---|
+| Specifies exact location, site, coordinates, or sensor identifier | +10 |
+| Specifies exact time, observation window, or alert timestamp | +8 |
+| Includes measured metric, unit, threshold, anomaly, or status | +7 |
+| Uses clear factual machine-generated wording | +5 |
+
+Do NOT subtract points because the alert does not mention people affected, casualties, or property damage. For IOT_SENSOR reports, concise technical data is expected.
+Do NOT award points for: reporter history, media attachments, or source platform — those are scored separately by the system.
+
+**Also:**
+- Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
+- Extract important keywords (Thai or English).
+- List any spam signals detected (malformed values, impossible readings, contradictory fields, etc.).
+- Decide if this looks like spam or fake data.
+
+**Respond ONLY with valid JSON in this exact format:**
+{{
+    "content_score": <int 0-30>,
+    "content_score_reasoning": "<brief explanation of points awarded>",
+    "suggested_category": "<string>",
+    "keywords": ["<string>", ...],
+    "spam_signals": ["<string>", ...],
+    "is_spam_likely": <boolean>
+}}"""
+
 # Prompt template for Gemini Vision (with images)
-VISION_ANALYSIS_PROMPT = """You are a disaster report verification AI with image analysis capability. Analyze the following disaster report including the attached image(s).
+# Gemini evaluates content quality (0-30) + image evidence (int). Python assembles the final score.
+VISION_ANALYSIS_PROMPT = """You are a disaster report verification AI with image analysis capability.
 
 **Report Content:**
 {content}
@@ -69,33 +126,107 @@ VISION_ANALYSIS_PROMPT = """You are a disaster report verification AI with image
 **Location (lat, lon):** {lat}, {lon}
 **Reported Time:** {timestamp}
 
-**Reporter History:**
+**Reporter History (context only — do NOT factor into content_score):**
 {reporter_history}
 
-**Instructions:**
-1. Carefully examine the attached image(s) for signs of:
-   - Real disaster damage (fire, flood, structural damage, etc.)
-   - Manipulation or editing artifacts
-   - Stock photos or internet-sourced images
-   - Consistency with the text description
-2. Evaluate the credibility of this report on a scale of 0-100 (trust_score).
-   - Images showing real damage: +20-30 points
-   - Images that look fake/manipulated: -30-50 points
-   - Images inconsistent with description: -20 points
-3. Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
-4. Extract important keywords (Thai or English).
-5. Describe what you see in the image(s) and how it affects your trust assessment.
-6. Detect if this looks like spam, fake news, or a duplicate pattern.
+**Task 1 — Score content quality (0–30):**
+
+| Criterion | Points |
+|---|---|
+| Specifies exact location (street name / neighbourhood / coordinates) | +10 |
+| Specifies time or timeline of the event | +8 |
+| Describes damage or number of people affected | +7 |
+| Uses factual language (not panic-driven / exaggerated) | +5 |
+
+**Task 2 — Analyse image(s) and return image_score:**
+Examine each image for authenticity and consistency with the text.
+
+| Finding | image_score |
+|---|---|
+| Image shows real disaster damage consistent with report | +20 |
+| Image shows real damage but only partially matches report | +10 |
+| Image is unrelated or unclear but not suspicious | 0 |
+| Image appears manipulated / edited | -10 |
+| Image is a stock photo or clearly sourced from the internet | -10 |
+
+Return a single integer for image_score reflecting your overall judgement.
+
+**Also:**
+- Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
+- Extract important keywords (Thai or English).
+- List any spam signals detected.
+- Decide if this looks like spam or fake news.
 
 **Respond ONLY with valid JSON in this exact format:**
 {{
-  "trust_score": <int 0-100>,
+  "content_score": <int 0-30>,
+  "content_score_reasoning": "<brief explanation of points awarded>",
+  "image_score": <int>,
   "suggested_category": "<string>",
   "keywords": ["<string>", ...],
-  "reasoning": "<string>",
+  "spam_signals": ["<string>", ...],
   "image_analysis": "<description of what you see in the image(s)>",
   "image_authenticity": "<real|likely_fake|uncertain>",
   "is_spam_likely": <boolean>
+}}"""
+
+IOT_VISION_ANALYSIS_PROMPT = """You are a disaster sensor alert verification AI with image analysis capability.
+
+**Sensor Alert Text:**
+{content}
+
+**Reporter Source:** {source}
+**Reporter ID:** {reporter_id}
+**Location (lat, lon):** {lat}, {lon}
+**Reported Time:** {timestamp}
+
+**Structured Sensor Data:**
+{sensor_data}
+
+**Reporter History (context only — do NOT factor into content_score):**
+{reporter_history}
+
+**Task 1 — Score content quality (0–30):**
+
+| Criterion | Points |
+|---|---|
+| Specifies exact location, site, coordinates, or sensor identifier | +10 |
+| Specifies exact time, observation window, or alert timestamp | +8 |
+| Includes measured metric, unit, threshold, anomaly, or status | +7 |
+| Uses clear factual machine-generated wording | +5 |
+
+Do NOT subtract points because the alert does not mention people affected, casualties, or property damage. For IOT_SENSOR reports, concise technical data is expected.
+
+**Task 2 — Analyse image(s) and return image_score:**
+Examine each image for authenticity and consistency with the sensor alert.
+
+| Finding | image_score |
+|---|---|
+| Image or frame supports the sensor alert and looks authentic | +20 |
+| Image partially supports the alert but evidence is limited | +10 |
+| Image is unrelated or unclear but not suspicious | 0 |
+| Image appears manipulated / edited | -10 |
+| Image is a stock photo or clearly sourced from the internet | -10 |
+
+Return a single integer for image_score reflecting your overall judgement.
+
+**Also:**
+- Suggest a disaster category from: FIRE, FLOOD, EARTHQUAKE, ACCIDENT, SOS, DAMAGE, OTHER.
+- Extract important keywords (Thai or English).
+- List any spam signals detected.
+- Decide if this looks like spam or fake data.
+
+**Respond ONLY with valid JSON in this exact format:**
+{{
+    "content_score": <int 0-30>,
+    "content_score_reasoning": "<brief explanation of points awarded>",
+    "image_score": <int>,
+    "suggested_category": "<string>",
+    "keywords": ["<string>", ...],
+    "spam_signals": ["<string>", ...],
+    "image_analysis": "<description of what you see in the image(s)>",
+    "image_authenticity": "<real|likely_fake|uncertain>",
+    "is_spam_likely": <boolean>
 }}"""
 
 
@@ -104,9 +235,9 @@ class GeminiService:
     Client for Google Gemini API — handles trust scoring analysis.
 
     Supports:
-      - Multi-key rotation on 429 errors
-      - Model fallback chain (flash-lite → flash → 3.1-flash-lite)
-      - Vision analysis for images from S3
+    - Multi-key rotation on 429 errors
+    - Ordered model fallback chain from configuration
+    - Vision analysis for images from S3
     """
 
     # Supported image types for vision analysis
@@ -140,6 +271,105 @@ class GeminiService:
         if self._s3_client is None:
             self._s3_client = boto3.client("s3", region_name=config.AWS_REGION)
         return self._s3_client
+
+    @staticmethod
+    def _is_iot_source(source: str) -> bool:
+        return (source or "").strip().upper() == "IOT_SENSOR"
+
+    @staticmethod
+    def _format_sensor_data(sensor_data: dict[str, Any] | None) -> str:
+        if not sensor_data:
+            return "None provided"
+
+        preferred_order = [
+            "sensor_id",
+            "sensor_type",
+            "site_id",
+            "metric_name",
+            "metric_value",
+            "unit",
+            "threshold",
+            "status",
+            "observed_at",
+        ]
+        lines: list[str] = []
+        for key in preferred_order:
+            value = sensor_data.get(key)
+            if value is not None and value != "":
+                lines.append(f"- {key}: {value}")
+        for key, value in sensor_data.items():
+            if key not in preferred_order and value is not None and value != "":
+                lines.append(f"- {key}: {value}")
+        return "\n".join(lines) if lines else "None provided"
+
+    def _build_text_prompt(
+        self,
+        content: str,
+        source: str,
+        reporter_id: str,
+        lat: float | str,
+        lon: float | str,
+        timestamp: str,
+        media_urls: str,
+        reporter_history: str,
+        sensor_data: dict[str, Any] | None,
+    ) -> str:
+        if self._is_iot_source(source):
+            return IOT_ANALYSIS_PROMPT.format(
+                content=content,
+                source=source,
+                reporter_id=reporter_id,
+                lat=lat,
+                lon=lon,
+                timestamp=timestamp,
+                media_urls=media_urls,
+                reporter_history=reporter_history,
+                sensor_data=self._format_sensor_data(sensor_data),
+            )
+
+        return ANALYSIS_PROMPT.format(
+            content=content,
+            source=source,
+            reporter_id=reporter_id,
+            lat=lat,
+            lon=lon,
+            timestamp=timestamp,
+            media_urls=media_urls,
+            reporter_history=reporter_history,
+        )
+
+    def _build_vision_prompt(
+        self,
+        content: str,
+        source: str,
+        reporter_id: str,
+        lat: float | str,
+        lon: float | str,
+        timestamp: str,
+        reporter_history: str,
+        sensor_data: dict[str, Any] | None,
+    ) -> str:
+        if self._is_iot_source(source):
+            return IOT_VISION_ANALYSIS_PROMPT.format(
+                content=content,
+                source=source,
+                reporter_id=reporter_id,
+                lat=lat,
+                lon=lon,
+                timestamp=timestamp,
+                reporter_history=reporter_history,
+                sensor_data=self._format_sensor_data(sensor_data),
+            )
+
+        return VISION_ANALYSIS_PROMPT.format(
+            content=content,
+            source=source,
+            reporter_id=reporter_id,
+            lat=lat,
+            lon=lon,
+            timestamp=timestamp,
+            reporter_history=reporter_history,
+        )
 
     def _get_client(self, api_key: str, model_name: str):
         """Get or create a Gemini GenerativeModel for the given key+model."""
@@ -436,6 +666,7 @@ class GeminiService:
         lon: float | None = None,
         timestamp: str = "",
         media_urls: list[str] | None = None,
+        sensor_data: dict[str, Any] | None = None,
         reporter_history: str = "",
     ) -> dict[str, Any]:
         """
@@ -469,8 +700,8 @@ class GeminiService:
             if use_vision:
                 # Use Vision API with images
                 logger.info(f"Using Gemini Vision with {len(image_parts)} image(s)")
-                
-                prompt = VISION_ANALYSIS_PROMPT.format(
+
+                prompt = self._build_vision_prompt(
                     content=content or "(no text content)",
                     source=source,
                     reporter_id=reporter_id,
@@ -478,6 +709,7 @@ class GeminiService:
                     lon=lon or "N/A",
                     timestamp=timestamp or "N/A",
                     reporter_history=history_str,
+                    sensor_data=sensor_data,
                 )
 
                 response_text = self._call_gemini_with_images(prompt, image_parts)
@@ -488,7 +720,7 @@ class GeminiService:
                     # Still include URLs in prompt even if we couldn't download
                     media_str = "\n".join(f"  - {url}" for url in media_urls[:10])
 
-                prompt = ANALYSIS_PROMPT.format(
+                prompt = self._build_text_prompt(
                     content=content or "(no text content)",
                     source=source,
                     reporter_id=reporter_id,
@@ -497,6 +729,7 @@ class GeminiService:
                     timestamp=timestamp or "N/A",
                     media_urls=media_str,
                     reporter_history=history_str,
+                    sensor_data=sensor_data,
                 )
 
                 response_text = self._call_gemini(prompt)
@@ -504,10 +737,12 @@ class GeminiService:
             result = json.loads(response_text)
             duration_ms = int((time.time() - start_time) * 1000)
 
+            content_score = int(result.get("content_score", 15))
+
             logger.info(
                 "Gemini analysis completed",
                 extra={"data": {
-                    "trust_score": result.get("trust_score"),
+                    "content_score": content_score,
                     "category": result.get("suggested_category"),
                     "duration_ms": duration_ms,
                     "model_used": self._current_model,
@@ -516,12 +751,13 @@ class GeminiService:
                 }},
             )
 
-            # Build response with optional Vision fields
+            # Build response — trust_score is assembled by compute_trust_score() in Python
             response = {
-                "trust_score": int(result.get("trust_score", 50)),
+                "content_score": content_score,
+                "content_score_reasoning": result.get("content_score_reasoning", ""),
                 "suggested_category": result.get("suggested_category", "OTHER"),
                 "keywords": result.get("keywords", []),
-                "reasoning": result.get("reasoning", ""),
+                "spam_signals": result.get("spam_signals", []),
                 "is_spam_likely": result.get("is_spam_likely", False),
                 "ai_analysis_failed": False,
                 "vision_used": use_vision,
@@ -529,6 +765,7 @@ class GeminiService:
 
             # Include Vision-specific fields if present
             if use_vision:
+                response["image_score"] = int(result.get("image_score", 0))
                 response["image_analysis"] = result.get("image_analysis", "")
                 response["image_authenticity"] = result.get("image_authenticity", "uncertain")
 
@@ -544,46 +781,43 @@ class GeminiService:
 
     @staticmethod
     def _fallback_result() -> dict[str, Any]:
-        """Default result when AI is unavailable — trust_score = 50 (neutral)."""
+        """Default result when AI is unavailable — neutral content_score."""
         return {
-            "trust_score": 50,
+            "content_score": 15,  # neutral mid-point (0-30)
+            "content_score_reasoning": "AI analysis unavailable — manual review required.",
             "suggested_category": "OTHER",
             "keywords": [],
-            "reasoning": "AI analysis unavailable — manual review required.",
+            "spam_signals": [],
             "is_spam_likely": False,
             "ai_analysis_failed": True,
         }
 
     def health_check(self) -> dict[str, Any]:
-        """Lightweight connectivity check for /health endpoint."""
-        if not self._api_keys and not config.GEMINI_API_KEY:
+        """Lightweight connectivity check via List Models API (no generation quota used)."""
+        import urllib.request
+        import urllib.error
+
+        api_key = self._current_key if self._api_keys else config.GEMINI_API_KEY
+        if not api_key:
             return {"status": "degraded", "error": "No API keys configured"}
 
+        model_name = self._model_chain[0] if self._model_chain else config.GEMINI_MODEL
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}&pageSize=1"
         try:
-            api_key = self._current_key
-            model_name = self._model_chain[0] if self._model_chain else config.GEMINI_MODEL
-            client = self._get_client(api_key, model_name)
-            response = client.generate_content(
-                "Reply with exactly: OK",
-                generation_config={"max_output_tokens": 10},
-                request_options={
-                    "timeout": config.GEMINI_TIMEOUT,
-                },
-            )
+            req = urllib.request.Request(url, headers={"User-Agent": "health-check/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                resp.read()
             return {
                 "status": "healthy",
                 "model": model_name,
                 "available_keys": len(self._api_keys),
                 "model_chain": self._model_chain,
             }
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                return {"status": "degraded", "error": f"API key invalid (HTTP {e.code})", "available_keys": len(self._api_keys)}
+            return {"status": "unhealthy", "error": f"HTTP {e.code}"}
         except Exception as e:
-            if self._is_rate_limited(e) or self._is_model_not_found(e):
-                return {
-                    "status": "degraded",
-                    "error": str(e)[:100],
-                    "available_keys": len(self._api_keys),
-                    "model_chain": self._model_chain,
-                }
             return {"status": "unhealthy", "error": str(e)[:100]}
 
 

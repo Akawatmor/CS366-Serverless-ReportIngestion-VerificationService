@@ -19,6 +19,33 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _sensor_data_to_dynamodb_map(sensor_data: dict) -> dict:
+    result: dict = {}
+    for key, value in sensor_data.items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            result[key] = {"BOOL": value}
+        elif isinstance(value, (int, float)):
+            result[key] = {"N": str(value)}
+        else:
+            result[key] = {"S": str(value)}
+    return result
+
+
+def _sensor_data_from_dynamodb_map(sensor_data_map: dict) -> dict:
+    result: dict = {}
+    for key, value in sensor_data_map.items():
+        if "S" in value:
+            result[key] = value["S"]
+        elif "N" in value:
+            number = value["N"]
+            result[key] = float(number) if "." in number else int(number)
+        elif "BOOL" in value:
+            result[key] = value["BOOL"]
+    return result
+
+
 @dataclass
 class GeoLocation:
     lat: float
@@ -47,6 +74,7 @@ class Report:
     # Content
     raw_content: str = ""
     media_urls: list[str] = field(default_factory=list)
+    sensor_data: Optional[dict] = None
     geo_location: Optional[GeoLocation] = None
 
     # Timestamps
@@ -59,6 +87,7 @@ class Report:
     ai_reasoning: str = ""
     suggested_category: str = ""
     ai_analysis_failed: bool = False
+    priority: int = 0
 
     # Status
     validation_status: str = ValidationStatus.RECEIVED.value
@@ -80,11 +109,14 @@ class Report:
             "trust_score": {"N": str(self.trust_score)},
             "validation_status": {"S": self.validation_status},
             "ai_analysis_failed": {"BOOL": self.ai_analysis_failed},
+            "priority": {"N": str(self.priority)},
         }
         if self.source_external_id:
             item["source_external_id"] = {"S": self.source_external_id}
         if self.media_urls:
             item["media_urls"] = {"L": [{"S": u} for u in self.media_urls]}
+        if self.sensor_data:
+            item["sensor_data"] = {"M": _sensor_data_to_dynamodb_map(self.sensor_data)}
         if self.geo_location:
             item["geo_location"] = {"M": {
                 "lat": {"N": str(self.geo_location.lat)},
@@ -126,6 +158,7 @@ class Report:
             reporter_id=item["reporter_id"]["S"],
             raw_content=item["raw_content"]["S"],
             media_urls=[u["S"] for u in item.get("media_urls", {}).get("L", [])],
+            sensor_data=_sensor_data_from_dynamodb_map(item["sensor_data"]["M"]) if "sensor_data" in item else None,
             geo_location=geo,
             event_timestamp=item.get("event_timestamp", {}).get("S"),
             ingested_at=item["ingested_at"]["S"],
@@ -134,6 +167,7 @@ class Report:
             ai_reasoning=item.get("ai_reasoning", {}).get("S", ""),
             suggested_category=item.get("suggested_category", {}).get("S", ""),
             ai_analysis_failed=item.get("ai_analysis_failed", {}).get("BOOL", False),
+            priority=int(item.get("priority", {}).get("N", 0)),
             validation_status=item["validation_status"]["S"],
             verified_by=item.get("verified_by", {}).get("S"),
             verification_notes=item.get("verification_notes", {}).get("S"),
@@ -160,6 +194,7 @@ class Report:
             "content": (self.raw_content[:80] + "...") if len(self.raw_content) > 80 else self.raw_content,
             "trust_score": self.trust_score,
             "suggested_category": self.suggested_category,
+            "priority": "HIGH" if self.priority > 0 else "NORMAL",
             "time_ago": time_ago,
         }
 
@@ -176,6 +211,7 @@ class Report:
                 "text": self.raw_content,
                 "images": [u for u in self.media_urls if u.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))],
                 "video": next((u for u in self.media_urls if u.endswith((".mp4", ".mov", ".avi"))), None),
+                "sensor_data": self.sensor_data,
             },
             "analysis": {
                 "trust_score": self.trust_score,
@@ -185,6 +221,7 @@ class Report:
                 "ai_analysis_failed": self.ai_analysis_failed,
                 "potential_duplicates": self.potential_duplicates,
             },
+            "priority": "HIGH" if self.priority > 0 else "NORMAL",
             "geo_location": self.geo_location.to_dict() if self.geo_location else None,
             "status": self.validation_status,
             "verified_by": self.verified_by,

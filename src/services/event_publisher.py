@@ -41,6 +41,7 @@ class EventPublisher:
         verified_by: str,
         verification_notes: str = "",
         action: str = "CREATE_NEW_INCIDENT",
+        target_incident_id: str | None = None,
     ) -> str:
         """
         Publish when a report is verified and should create/merge an Incident.
@@ -55,7 +56,10 @@ class EventPublisher:
             "suggested_incident_data": suggested_incident_data,
             "verified_by": verified_by,
             "verification_notes": verification_notes,
+            "action": action,
         }
+        if target_incident_id:
+            detail["target_incident_id"] = target_incident_id
 
         return self._put_event(
             event_id=event_id,

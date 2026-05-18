@@ -64,6 +64,22 @@ class TestValidateIngestPayload:
         errors = validate_ingest_payload(payload)
         assert errors == []
 
+    def test_sensor_only_iot_payload_is_valid(self):
+        payload = {
+            "reporter_source": "IOT_SENSOR",
+            "reporter_id": "sensor-station-01",
+            "sensor_data": {
+                "sensor_id": "wl-01",
+                "metric_name": "water_level",
+                "metric_value": 2.8,
+                "unit": "m",
+                "threshold": 2.0,
+                "observed_at": "2026-02-18T14:30:00Z",
+            },
+        }
+        errors = validate_ingest_payload(payload)
+        assert errors == []
+
     def test_invalid_geo_location(self, sample_ingest_payload):
         sample_ingest_payload["geo_location"] = {"lat": 999, "lon": 100}
         errors = validate_ingest_payload(sample_ingest_payload)
@@ -84,6 +100,28 @@ class TestValidateIngestPayload:
         sample_ingest_payload["media_urls"] = ["not-a-url"]
         errors = validate_ingest_payload(sample_ingest_payload)
         assert any("media_urls" in e for e in errors)
+
+    def test_invalid_sensor_data_type(self, sample_ingest_payload):
+        sample_ingest_payload["sensor_data"] = "bad"
+        errors = validate_ingest_payload(sample_ingest_payload)
+        assert any("sensor_data must be an object" in e for e in errors)
+
+    def test_invalid_sensor_data_metric_value(self, sample_ingest_payload):
+        sample_ingest_payload["sensor_data"] = {
+            "metric_name": "water_level",
+            "metric_value": "high",
+        }
+        errors = validate_ingest_payload(sample_ingest_payload)
+        assert any("sensor_data.metric_value must be numeric" in e for e in errors)
+
+    def test_invalid_sensor_data_observed_at(self, sample_ingest_payload):
+        sample_ingest_payload["sensor_data"] = {
+            "metric_name": "water_level",
+            "metric_value": 2.8,
+            "observed_at": "yesterday",
+        }
+        errors = validate_ingest_payload(sample_ingest_payload)
+        assert any("sensor_data.observed_at" in e for e in errors)
 
 
 # ============================================================
@@ -120,6 +158,13 @@ class TestValidateVerifyPayload:
     def test_duplicate_is_valid(self):
         errors = validate_verify_payload({"validation_status": "DUPLICATE"})
         assert errors == []
+
+    def test_link_to_incident_requires_verified_status(self):
+        errors = validate_verify_payload({
+            "validation_status": "SPAM",
+            "link_to_incident_id": "019C774D-1AC5-75BB-AE95-5CD4AEB8925B",
+        })
+        assert any("only allowed when validation_status is VERIFIED" in e for e in errors)
 
 
 # ============================================================
@@ -213,6 +258,15 @@ class TestValidateListParams:
         _, errors = validate_list_params({"min_trust_score": "abc"})
         assert len(errors) > 0
 
+    def test_priority_filter_high(self):
+        parsed, errors = validate_list_params({"priority": "high"})
+        assert errors == []
+        assert parsed["priority"] == "high"
+
+    def test_invalid_priority_filter(self):
+        _, errors = validate_list_params({"priority": "urgent"})
+        assert any("priority" in e for e in errors)
+
 
 class TestValidateStatsParams:
     """Tests for GET /reports/stats query parameters."""
@@ -230,3 +284,12 @@ class TestValidateStatsParams:
     def test_invalid_timeframe(self):
         _, errors = validate_stats_params({"timeframe": "last_year"})
         assert len(errors) > 0
+
+    def test_valid_region_filter(self):
+        parsed, errors = validate_stats_params({"region": "bkk"})
+        assert errors == []
+        assert parsed["region"] == "bkk"
+
+    def test_invalid_region_filter(self):
+        _, errors = validate_stats_params({"region": "mars"})
+        assert any("region" in e for e in errors)

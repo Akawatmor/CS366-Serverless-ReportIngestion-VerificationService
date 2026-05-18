@@ -118,7 +118,7 @@
             margin-bottom: 1.5rem;
         }
         .config-title { font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
-        .config-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 0.75rem; align-items: end; }
+        .config-row { display: grid; grid-template-columns: 1.1fr 1fr 1fr auto; gap: 0.75rem; align-items: end; }
         .form-group { display: flex; flex-direction: column; gap: 0.25rem; }
         .form-label { font-size: 0.75rem; font-weight: 600; color: var(--text-light); }
         .form-input {
@@ -142,6 +142,11 @@
             white-space: nowrap;
         }
         .btn-save:hover { background: var(--primary-dark); }
+        .spec-status {
+            margin-top: 0.65rem;
+            font-size: 0.8rem;
+            color: var(--text-light);
+        }
 
         /* API Panel */
         .api-panel { display: none; }
@@ -381,6 +386,7 @@
     <div class="navbar-links">
         <a href="/">Home</a>
         <a href="/dashboard/" class="active">Dashboard</a>
+        <a href="/admin-verify/">Admin Verify</a>
         <a href="https://github.com/Akawatmor/CS366-Serverless-ReportIngestion-VerificationService" target="_blank">GitHub</a>
     </div>
 </nav>
@@ -423,6 +429,15 @@
     <div class="sidebar-item" onclick="showPanel('upload')">
         <span class="sidebar-method POST">POST</span> /reports/upload-url
     </div>
+    <div class="sidebar-item" onclick="showPanel('changelog')">
+        <span class="sidebar-method GET">GET</span> /changelog.xml
+    </div>
+    <div class="sidebar-item" onclick="showPanel('deprecation')">
+        <span class="sidebar-method GET">GET</span> /deprecation-info
+    </div>
+    <div class="sidebar-item" onclick="showPanel('trace')">
+        <span class="sidebar-method GET">GET</span> /reports/trace/{id}
+    </div>
 
     <div class="sidebar-section">Quick Actions</div>
     <div class="sidebar-item" onclick="showPanel('overview')">&#128202; Live Overview</div>
@@ -443,13 +458,21 @@
                 <div class="form-group">
                     <label class="form-label">API Base URL (e.g. https://xxx.execute-api.us-east-1.amazonaws.com/dev/v1)</label>
                     <input type="text" class="form-input" id="cfg-url" placeholder="https://abc123.execute-api.us-east-1.amazonaws.com/dev/v1">
+                    <div class="form-hint">Paste the full API Gateway stage URL ending in <code>/v1</code>. This becomes the prefix for every request on this page.</div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">API Key (X-Api-Key)</label>
                     <input type="password" class="form-input" id="cfg-key" placeholder="Your API Key from terraform output">
+                    <div class="form-hint">Required for protected endpoints. The value is stored only in this browser via localStorage.</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">OpenAPI Spec URL</label>
+                    <input type="text" class="form-input" id="cfg-spec-url" placeholder="/openapi.json">
+                    <div class="form-hint">Use <code>/openapi.json</code> for the S3 site, or an absolute URL if the spec is hosted somewhere else.</div>
                 </div>
                 <button class="btn-save" onclick="saveConfig()">Save</button>
             </div>
+            <div class="spec-status" id="spec-status">OpenAPI spec: not loaded</div>
         </div>
         <div class="config-panel">
             <div class="config-title">&#128214; Quick Guide</div>
@@ -457,7 +480,8 @@
                 <p><strong>1. Deploy:</strong> Run <code>./scripts/deploy.sh</code> to deploy the infrastructure.</p>
                 <p><strong>2. Get URL:</strong> Copy the <code>api_url</code> output and paste above.</p>
                 <p><strong>3. Get Key:</strong> Run <code>terraform output -raw api_key</code> and paste above.</p>
-                <p><strong>4. Test:</strong> Use the sidebar to test each endpoint interactively.</p>
+                <p><strong>4. Spec:</strong> OpenAPI defaults to <code>/openapi.json</code> (from static S3 website).</p>
+                <p><strong>5. Test:</strong> Use the sidebar to test each endpoint interactively.</p>
                 <p style="margin-top:0.5rem;"><strong>Endpoints:</strong></p>
                 <ul style="margin-left:1.5rem;">
                     <li><code>GET /health</code> — Check system status (no auth required)</li>
@@ -523,34 +547,42 @@
                             <option value="OFFICIAL_APP">OFFICIAL_APP</option>
                             <option value="IOT_SENSOR">IOT_SENSOR</option>
                         </select>
+                        <div class="form-hint">Used in deterministic scoring so official apps and sensors can be weighted differently from social posts.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Reporter ID</label>
                         <input type="text" class="form-input-sm" id="ingest-reporter" placeholder="@user123" value="@test_user">
+                        <div class="form-hint">Stable account or device identifier used for reporter history, rate limiting, and audit traceability.</div>
                     </div>
                     <div class="field-full">
                         <label class="form-label-sm">Raw Content</label>
                         <textarea class="form-input-sm" id="ingest-content" rows="3" placeholder="Disaster report text...">ไฟไหม้ร้านทอง เยาวราช ตอนนี้เลย! ควันดำลอยมาเห็นจากไกล #BKKFire</textarea>
+                        <div class="form-hint">Primary report text sent to the backend and AI analysis. Include enough detail for location, timing, and impact.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Latitude</label>
                         <input type="number" class="form-input-sm" id="ingest-lat" step="any" value="13.746123" placeholder="13.746">
+                        <div class="form-hint">Decimal degrees for deduplication, map lookup, and incident clustering.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Longitude</label>
                         <input type="number" class="form-input-sm" id="ingest-lon" step="any" value="100.539123" placeholder="100.539">
+                        <div class="form-hint">Keep this paired with latitude from the same source so location-based matching stays accurate.</div>
                     </div>
                     <div class="field-full">
                         <label class="form-label-sm">Media URLs (comma-separated)</label>
                         <input type="text" class="form-input-sm" id="ingest-media" placeholder="https://img.host/fire123.jpg, https://video.host/clip.mp4">
+                        <div class="form-hint">Optional evidence links. Public image URLs or S3 image URLs can be used by Gemini vision; videos stay as operator evidence.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Event Timestamp (optional)</label>
                         <input type="datetime-local" class="form-input-sm" id="ingest-timestamp">
+                        <div class="form-hint">When the incident happened, not when you submit the form. Helps timeline reasoning and later correlation.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Source External ID (optional, for idempotency)</label>
                         <input type="text" class="form-input-sm" id="ingest-extid" placeholder="tweet-123456789">
+                        <div class="form-hint">Original post or message identifier. Reusing the same value helps prevent duplicate ingestion during retries.</div>
                     </div>
                 </div>
             </div>
@@ -592,18 +624,22 @@
                             <option value="REJECTED">REJECTED</option>
                             <option value="DUPLICATE">DUPLICATE</option>
                         </select>
+                        <div class="form-hint">Primary workflow filter. This maps to the indexed status used by the backend query.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Min Trust Score</label>
                         <input type="number" class="form-input-sm" id="list-score" min="0" max="100" placeholder="0" value="">
+                        <div class="form-hint">Use this to skip low-confidence items when you only want stronger candidates.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Limit</label>
                         <input type="number" class="form-input-sm" id="list-limit" min="1" max="100" value="10">
+                        <div class="form-hint">Number of reports to fetch in one request. Smaller pages are easier during manual review.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Last Evaluated Key (pagination)</label>
                         <input type="text" class="form-input-sm" id="list-next" placeholder="Paste next_token here">
+                        <div class="form-hint">Paste the <code>next_token</code> from the previous response to continue from the next page.</div>
                     </div>
                 </div>
             </div>
@@ -667,6 +703,7 @@
                     <div class="field-full">
                         <label class="form-label-sm">Report ID (UUID)</label>
                         <input type="text" class="form-input-sm" id="verify-id" placeholder="r-550e8400-e29b-41d4-a716-446655440000">
+                        <div class="form-hint">Target report to update. Use the ID from a POST response, list result, or detail page.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">New Status</label>
@@ -676,18 +713,22 @@
                             <option value="REJECTED">REJECTED</option>
                             <option value="DUPLICATE">DUPLICATE</option>
                         </select>
+                        <div class="form-hint">Choose the outcome. <code>VERIFIED</code> can drive downstream incident creation, while other states stop escalation.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Reviewer ID</label>
                         <input type="text" class="form-input-sm" id="verify-reviewer" value="officer_007" placeholder="officer_007">
+                        <div class="form-hint">Operator identifier written into audit logs so each decision is attributable.</div>
                     </div>
                     <div class="field-full">
                         <label class="form-label-sm">Reviewer Notes (optional)</label>
                         <input type="text" class="form-input-sm" id="verify-notes" placeholder="Confirmed via CCTV feed.">
+                        <div class="form-hint">Human reasoning for the decision. Useful when another officer reviews or appeals the case later.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Link to Incident ID (optional, for merge)</label>
                         <input type="text" class="form-input-sm" id="verify-incident" placeholder="inc-1234-5678">
+                        <div class="form-hint">Fill this only when the report should be merged into an already-open incident instead of creating a new one.</div>
                     </div>
                 </div>
             </div>
@@ -720,14 +761,17 @@
                     <div class="field-full">
                         <label class="form-label-sm">Report ID (UUID)</label>
                         <input type="text" class="form-input-sm" id="delete-id" placeholder="r-550e8400-e29b-41d4-a716-446655440000">
+                        <div class="form-hint">The report record to soft delete. The item stays in DynamoDB with a deleted status for traceability.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Reason (Required)</label>
                         <input type="text" class="form-input-sm" id="delete-reason" value="Contains sensitive PII data" placeholder="Reason for deletion">
+                        <div class="form-hint">Mandatory audit context so future reviewers know why the record was hidden from normal workflows.</div>
                     </div>
                     <div>
                         <label class="form-label-sm">Deleted By (Required)</label>
                         <input type="text" class="form-input-sm" id="delete-by" value="admin_001" placeholder="admin_001">
+                        <div class="form-hint">Administrative actor recorded in the audit trail for compliance and incident retrospectives.</div>
                     </div>
                 </div>
             </div>
@@ -747,7 +791,7 @@
             <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
             <span class="panel-title">/reports/stats</span>
         </div>
-        <p class="panel-desc">Dashboard summary statistics using Atomic Counter Table. Reads pre-aggregated data for millisecond response times.</p>
+        <p class="panel-desc">Dashboard summary statistics using Atomic Counter Table. Includes heatmap data and trending keywords.</p>
 
         <div id="stats-cards"></div>
 
@@ -766,11 +810,31 @@
                             <option value="last_24h">Last 24 Hours</option>
                             <option value="last_7d">Last 7 Days</option>
                         </select>
+                        <div class="form-hint">Controls the aggregation window returned by the stats endpoint.</div>
+                    </div>
+                    <div>
+                        <label class="form-label-sm">Region Filter</label>
+                        <select class="form-input-sm" id="stats-region">
+                            <option value="">All Regions</option>
+                            <option value="bkk">Bangkok</option>
+                            <option value="central">Central</option>
+                            <option value="north">North</option>
+                            <option value="northeast">Northeast</option>
+                            <option value="south">South</option>
+                        </select>
+                        <div class="form-hint">Optional geographic slice when you want operational metrics for a single region only.</div>
                     </div>
                 </div>
             </div>
         </div>
-        <div class="response-card">
+
+        <!-- Trending Keywords -->
+        <div id="stats-trending" style="margin-top:1rem;"></div>
+
+        <!-- Heatmap Table -->
+        <div id="stats-heatmap" style="margin-top:1rem;"></div>
+
+        <div class="response-card" style="margin-top:1rem;">
             <div class="response-header">
                 <div class="response-status" id="stats-status">Response</div>
                 <div class="response-meta" id="stats-meta"></div>
@@ -816,10 +880,12 @@
             <div class="form-group">
                 <label>Report ID (optional — leave blank for all)</label>
                 <input id="audit-report-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000">
+                <div class="form-hint">Leave empty to scan recent audit entries across the system, or enter one report ID to inspect a single case.</div>
             </div>
             <div class="form-group">
                 <label>Limit</label>
                 <input id="audit-limit" type="number" value="20" min="1" max="100">
+                <div class="form-hint">Maximum number of audit events to load in one request.</div>
             </div>
             <button class="btn" onclick="fetchAuditLogs()">Fetch Audit Logs</button>
         </div>
@@ -853,10 +919,12 @@
                     <option value="verified">ReportVerifiedEvent</option>
                     <option value="status-changed">ReportStatusChangedEvent</option>
                 </select>
+                <div class="form-hint">Filter the EventBridge contract stream to the event family you want to inspect.</div>
             </div>
             <div class="form-group">
                 <label>Limit</label>
                 <input id="events-limit" type="number" value="20" min="1" max="50">
+                <div class="form-hint">Caps the number of recent events returned to keep the page responsive.</div>
             </div>
             <button class="btn" onclick="fetchEvents()">Fetch Events</button>
         </div>
@@ -894,11 +962,13 @@
             <div class="form-group">
                 <label>Report ID (optional — link to existing report)</label>
                 <input id="upload-report-id" placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000">
+                <div class="form-hint">Attach the upload to an existing report if you already know the case ID. Leave blank for a standalone media test.</div>
             </div>
             <div class="form-group">
                 <label>Select File</label>
                 <input type="file" id="upload-file" accept="image/*,video/mp4,video/quicktime,application/pdf"
                        onchange="previewUploadFile()" style="padding:0.5rem;">
+                <div class="form-hint">Images, MP4, MOV, and PDF are supported. The file is uploaded with a presigned S3 URL and returns a media URL.</div>
             </div>
             <div id="upload-preview" style="margin-top:.5rem; display:none;"></div>
             <button class="btn" onclick="uploadMedia()" id="upload-btn" disabled>Upload File</button>
@@ -920,6 +990,92 @@
         </div>
     </div>
 
+    <!-- ==================== CHANGELOG RSS PANEL ==================== -->
+    <div class="api-panel" id="panel-changelog">
+        <div class="panel-header">
+            <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
+            <span class="panel-title">/changelog.xml</span>
+        </div>
+        <p class="panel-desc">Read RSS feed for release notes and contract changes.</p>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method GET">GET</span>
+                <span class="request-url">/changelog.xml</span>
+                <button class="btn-send" onclick="sendChangelog()">&#9654; Send</button>
+            </div>
+        </div>
+
+        <div class="response-card">
+            <div class="response-header">
+                <div class="response-status" id="changelog-status">Response</div>
+                <div class="response-meta" id="changelog-meta"></div>
+            </div>
+            <div id="changelog-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== DEPRECATION INFO PANEL ==================== -->
+    <div class="api-panel" id="panel-deprecation">
+        <div class="panel-header">
+            <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
+            <span class="panel-title">/deprecation-info</span>
+        </div>
+        <p class="panel-desc">View all deprecated endpoints, sunset dates, and migration guides.</p>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method GET">GET</span>
+                <span class="request-url">/deprecation-info</span>
+                <button class="btn-send" onclick="sendDeprecationInfo()">&#9654; Send</button>
+            </div>
+        </div>
+
+        <div id="deprecation-info-cards"></div>
+
+        <div class="response-card" style="margin-top:1rem;">
+            <div class="response-header">
+                <div class="response-status" id="deprecation-status">Response</div>
+                <div class="response-meta" id="deprecation-meta"></div>
+            </div>
+            <div id="deprecation-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
+    <!-- ==================== TRACE LOOKUP PANEL ==================== -->
+    <div class="api-panel" id="panel-trace">
+        <div class="panel-header">
+            <span class="sidebar-method GET" style="font-size:0.8rem;">GET</span>
+            <span class="panel-title">/reports/trace/{trace_id}</span>
+        </div>
+        <p class="panel-desc">Search CloudWatch Logs by X-Trace-Id for end-to-end request tracing across all Lambda functions.</p>
+
+        <div class="request-card">
+            <div class="request-header">
+                <span class="sidebar-method GET">GET</span>
+                <span class="request-url">/reports/trace/{trace_id}</span>
+                <button class="btn-send" onclick="sendTrace()">&#9654; Send</button>
+            </div>
+            <div class="request-body">
+                <div class="form-group">
+                    <label class="form-label-sm">Trace ID (from X-Trace-Id header or traceId in response body)</label>
+                    <input type="text" class="form-input-sm" id="trace-id" placeholder="e.g. 4b96bc3c-bbff-40e7-a57f-9281d5b90875">
+                    <div class="form-hint">Copy from any API response's X-Trace-Id header or traceId field</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="trace-results"></div>
+
+        <div class="response-card" style="margin-top:1rem;">
+            <div class="response-header">
+                <div class="response-status" id="trace-status">Response</div>
+                <div class="response-meta" id="trace-meta"></div>
+            </div>
+            <div id="trace-response" class="response-empty">Send a request to see the response</div>
+        </div>
+    </div>
+
 </main>
 </div>
 
@@ -932,19 +1088,125 @@
 // =========================================
 const CONFIG = {
     baseUrl: localStorage.getItem('api_base_url') || '',
-    apiKey: localStorage.getItem('api_key') || ''
+    apiKey: localStorage.getItem('api_key') || '',
+    specUrl: localStorage.getItem('openapi_spec_url') || '/openapi.json'
+};
+
+const OPENAPI = {
+    spec: null,
+    operations: {}
+};
+
+const FALLBACK_OPERATIONS = {
+    getHealth: { method: 'GET', path: '/health' },
+    createReport: { method: 'POST', path: '/reports' },
+    listReports: { method: 'GET', path: '/reports' },
+    getReportById: { method: 'GET', path: '/reports/{report_id}' },
+    verifyReport: { method: 'PATCH', path: '/reports/{report_id}' },
+    deleteReport: { method: 'DELETE', path: '/reports/{report_id}' },
+    getReportStats: { method: 'GET', path: '/reports/stats' },
+    getAuditLogs: { method: 'GET', path: '/reports/audit' },
+    getEventLogs: { method: 'GET', path: '/reports/events' },
+    createUploadUrl: { method: 'POST', path: '/reports/upload-url' },
+    getChangelogRss: { method: 'GET', path: '/changelog.xml' }
 };
 
 // Init config fields
 document.getElementById('cfg-url').value = CONFIG.baseUrl;
 document.getElementById('cfg-key').value = CONFIG.apiKey;
+document.getElementById('cfg-spec-url').value = CONFIG.specUrl;
+
+function buildOpenApiOperationIndex(spec) {
+    const ops = {};
+    const methods = ['get', 'post', 'patch', 'delete'];
+    const paths = spec && spec.paths ? spec.paths : {};
+
+    for (const [path, pathItem] of Object.entries(paths)) {
+        for (const method of methods) {
+            const op = pathItem[method];
+            if (!op || !op.operationId) {
+                continue;
+            }
+            ops[op.operationId] = {
+                method: method.toUpperCase(),
+                path,
+                summary: op.summary || ''
+            };
+        }
+    }
+
+    return ops;
+}
+
+function getOperationPath(operationId, expectedMethod) {
+    const indexed = OPENAPI.operations[operationId];
+    if (indexed && (!expectedMethod || indexed.method === expectedMethod)) {
+        return indexed.path;
+    }
+
+    const fallback = FALLBACK_OPERATIONS[operationId];
+    if (!fallback) {
+        throw new Error(`Unknown operationId: ${operationId}`);
+    }
+    if (expectedMethod && fallback.method !== expectedMethod) {
+        throw new Error(`Method mismatch for ${operationId}. Expected ${expectedMethod}, got ${fallback.method}`);
+    }
+    return fallback.path;
+}
+
+function buildOperationPath(operationId, expectedMethod, pathParams = {}, queryParams = {}) {
+    let path = getOperationPath(operationId, expectedMethod);
+    for (const [key, value] of Object.entries(pathParams)) {
+        path = path.replace(new RegExp(`\\{${key}\\}`, 'g'), encodeURIComponent(String(value)));
+    }
+
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(queryParams)) {
+        if (value !== undefined && value !== null && value !== '') {
+            qs.set(key, String(value));
+        }
+    }
+
+    const query = qs.toString();
+    return query ? `${path}?${query}` : path;
+}
+
+function setSpecStatus(message, isError = false) {
+    const statusEl = document.getElementById('spec-status');
+    statusEl.textContent = message;
+    statusEl.style.color = isError ? 'var(--danger)' : 'var(--text-light)';
+}
+
+async function loadOpenApiSpec() {
+    const specUrl = (CONFIG.specUrl || '/openapi.json').trim();
+    try {
+        const resp = await fetch(specUrl, { headers: { 'Accept': 'application/json' } });
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+        }
+        const spec = await resp.json();
+        OPENAPI.spec = spec;
+        OPENAPI.operations = buildOpenApiOperationIndex(spec);
+
+        const opCount = Object.keys(OPENAPI.operations).length;
+        const version = spec.info && spec.info.version ? spec.info.version : 'unknown';
+        setSpecStatus(`OpenAPI loaded: ${version} (${opCount} operations) from ${specUrl}`);
+    } catch (err) {
+        OPENAPI.spec = null;
+        OPENAPI.operations = {};
+        setSpecStatus(`OpenAPI load failed (${specUrl}): ${err.message}. Using local fallback paths.`, true);
+    }
+}
 
 function saveConfig() {
     CONFIG.baseUrl = document.getElementById('cfg-url').value.replace(/\/+$/, '');
     CONFIG.apiKey = document.getElementById('cfg-key').value;
+    CONFIG.specUrl = document.getElementById('cfg-spec-url').value.trim() || '/openapi.json';
     localStorage.setItem('api_base_url', CONFIG.baseUrl);
     localStorage.setItem('api_key', CONFIG.apiKey);
+    localStorage.setItem('openapi_spec_url', CONFIG.specUrl);
     showToast('Configuration saved!', 'success');
+    loadOpenApiSpec();
 }
 
 // =========================================
@@ -954,7 +1216,16 @@ function showPanel(name) {
     document.querySelectorAll('.api-panel').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.sidebar-item').forEach(i => i.classList.remove('active'));
     document.getElementById(`panel-${name}`).classList.add('active');
-    event.currentTarget.classList.add('active');
+    if (typeof event !== 'undefined' && event && event.currentTarget) {
+        event.currentTarget.classList.add('active');
+        return;
+    }
+    const match = Array.from(document.querySelectorAll('.sidebar-item')).find((el) => {
+        return (el.getAttribute('onclick') || '').includes(`showPanel('${name}')`);
+    });
+    if (match) {
+        match.classList.add('active');
+    }
 }
 
 // =========================================
@@ -993,10 +1264,23 @@ async function apiRequest(method, path, body = null) {
     const resp = await fetch(url, opts);
     const elapsed = Math.round(performance.now() - start);
 
-    let data;
-    try { data = await resp.json(); } catch { data = null; }
+    const contentType = resp.headers.get('content-type') || '';
+    const rawBody = await resp.text();
 
-    return { status: resp.status, data, elapsed };
+    let data = null;
+    if (rawBody) {
+        if (contentType.includes('application/json')) {
+            try {
+                data = JSON.parse(rawBody);
+            } catch {
+                data = rawBody;
+            }
+        } else {
+            data = rawBody;
+        }
+    }
+
+    return { status: resp.status, data, elapsed, contentType };
 }
 
 function updateResponseUI(prefix, result) {
@@ -1007,11 +1291,36 @@ function updateResponseUI(prefix, result) {
     // Status code color
     const codeClass = result.status < 300 ? 'status-2xx' : result.status < 500 ? 'status-4xx' : 'status-5xx';
     statusEl.innerHTML = `<span class="status-code ${codeClass}">${result.status}</span> Response`;
-    metaEl.textContent = `${result.elapsed}ms`;
+    metaEl.textContent = result.contentType ? `${result.elapsed}ms • ${result.contentType}` : `${result.elapsed}ms`;
 
     // Body
     bodyEl.className = 'response-body';
-    bodyEl.textContent = result.data ? JSON.stringify(result.data, null, 2) : '(empty)';
+    if (typeof result.data === 'string') {
+        bodyEl.textContent = result.data;
+    } else if (result.data) {
+        bodyEl.textContent = JSON.stringify(result.data, null, 2);
+    } else {
+        bodyEl.textContent = '(empty)';
+    }
+}
+
+function updateLegacyResponseUI(statusId, timeId, bodyId, result) {
+    const statusEl = document.getElementById(statusId);
+    const timeEl = document.getElementById(timeId);
+    const bodyEl = document.getElementById(bodyId);
+
+    const codeClass = result.status < 300 ? 'status-2xx' : result.status < 500 ? 'status-4xx' : 'status-5xx';
+    statusEl.innerHTML = `<span class="status-code ${codeClass}">${result.status}</span> Response`;
+    timeEl.textContent = result.contentType ? `${result.elapsed}ms • ${result.contentType}` : `${result.elapsed}ms`;
+
+    bodyEl.className = 'response-body';
+    if (typeof result.data === 'string') {
+        bodyEl.textContent = result.data;
+    } else if (result.data) {
+        bodyEl.textContent = JSON.stringify(result.data, null, 2);
+    } else {
+        bodyEl.textContent = '(empty)';
+    }
 }
 
 // =========================================
@@ -1019,7 +1328,7 @@ function updateResponseUI(prefix, result) {
 // =========================================
 async function sendHealth() {
     try {
-        const r = await apiRequest('GET', '/health');
+        const r = await apiRequest('GET', buildOperationPath('getHealth', 'GET'));
         updateResponseUI('health', r);
 
         // Render health cards
@@ -1074,7 +1383,7 @@ async function sendIngest() {
     if (extId) body.source_external_id = extId;
 
     try {
-        const r = await apiRequest('POST', '/reports', body);
+        const r = await apiRequest('POST', buildOperationPath('createReport', 'POST'), body);
         updateResponseUI('ingest', r);
         if (r.status < 300 && r.data && r.data.report_id) {
             showToast(`Report created: ${r.data.report_id}`, 'success');
@@ -1088,21 +1397,18 @@ async function sendIngest() {
 // List Reports
 // =========================================
 async function sendList() {
-    const params = new URLSearchParams();
     const status = document.getElementById('list-status').value;
-    if (status) params.set('status', status);
-
     const score = document.getElementById('list-score').value;
-    if (score) params.set('min_trust_score', score);
-
     const limit = document.getElementById('list-limit').value;
-    if (limit) params.set('limit', limit);
-
     const next = document.getElementById('list-next').value;
-    if (next) params.set('last_evaluated_key', next);
 
     try {
-        const r = await apiRequest('GET', `/reports?${params.toString()}`);
+        const r = await apiRequest('GET', buildOperationPath('listReports', 'GET', {}, {
+            status,
+            min_trust_score: score,
+            limit,
+            last_evaluated_key: next,
+        }));
         document.getElementById('list-meta').textContent = `${r.elapsed}ms`;
 
         const statusEl = document.getElementById('list-status-resp');
@@ -1143,7 +1449,7 @@ function renderReportList(containerId, reports) {
 
 function loadReportDetail(id) {
     document.getElementById('detail-id').value = id;
-    document.querySelectorAll('.sidebar-item')[4].click(); // Switch to detail panel
+    showPanel('detail');
     sendDetail();
 }
 
@@ -1155,7 +1461,7 @@ async function sendDetail() {
     if (!id) { showToast('Please enter a Report ID', 'error'); return; }
 
     try {
-        const r = await apiRequest('GET', `/reports/${id}`);
+        const r = await apiRequest('GET', buildOperationPath('getReportById', 'GET', { report_id: id }));
         updateResponseUI('detail', r);
     } catch (e) {
         showToast(e.message, 'error');
@@ -1181,7 +1487,7 @@ async function sendVerify() {
     if (incident) body.link_to_incident_id = incident;
 
     try {
-        const r = await apiRequest('PATCH', `/reports/${id}`, body);
+        const r = await apiRequest('PATCH', buildOperationPath('verifyReport', 'PATCH', { report_id: id }), body);
         document.getElementById('verify-meta').textContent = `${r.elapsed}ms`;
 
         const statusEl = document.getElementById('verify-status-resp');
@@ -1211,7 +1517,7 @@ async function sendDelete() {
     };
 
     try {
-        const r = await apiRequest('DELETE', `/reports/${id}`, body);
+        const r = await apiRequest('DELETE', buildOperationPath('deleteReport', 'DELETE', { report_id: id }), body);
         updateResponseUI('delete', r);
         if (r.status < 300) {
             showToast(`Report deleted: ${id}`, 'success');
@@ -1226,9 +1532,13 @@ async function sendDelete() {
 // =========================================
 async function sendStats() {
     const tf = document.getElementById('stats-timeframe').value;
+    const region = document.getElementById('stats-region').value;
+
+    const qp = { timeframe: tf };
+    if (region) qp.region = region;
 
     try {
-        const r = await apiRequest('GET', `/reports/stats?timeframe=${tf}`);
+        const r = await apiRequest('GET', buildOperationPath('getReportStats', 'GET', {}, qp));
         updateResponseUI('stats', r);
 
         // Render stat cards
@@ -1240,6 +1550,71 @@ async function sendStats() {
                 <div class="stat-card"><div class="stat-value" style="color:var(--success)">${s.verified_incidents || 0}</div><div class="stat-label">Verified</div></div>
                 <div class="stat-card"><div class="stat-value" style="color:var(--danger)">${s.spam_rejected || 0}</div><div class="stat-label">Spam / Rejected</div></div>
             </div>`;
+        }
+
+        // Render trending keywords
+        const trendingEl = document.getElementById('stats-trending');
+        if (r.data && r.data.trending_keywords && r.data.trending_keywords.length > 0) {
+            const keywords = r.data.trending_keywords;
+            trendingEl.innerHTML = `
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+                    <h3 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem;">&#128293; Trending Keywords</h3>
+                    <div style="display:flex;flex-wrap:wrap;gap:0.5rem;">
+                        ${keywords.map(kw => {
+                            const size = Math.max(0.75, Math.min(1.4, 0.75 + kw.count * 0.1));
+                            return `<span style="display:inline-flex;align-items:center;gap:0.3rem;padding:0.3rem 0.7rem;
+                                background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;font-size:${size}rem;font-weight:600;color:#1e40af;">
+                                ${escapeHtml(kw.keyword)} <span style="font-size:0.7rem;font-weight:400;color:#64748b;">(${kw.count})</span>
+                                ${kw.category ? `<span style="font-size:0.6rem;background:#fef3c7;color:#92400e;padding:0.1rem 0.3rem;border-radius:3px;">${escapeHtml(kw.category)}</span>` : ''}
+                            </span>`;
+                        }).join('')}
+                    </div>
+                </div>`;
+        } else {
+            trendingEl.innerHTML = '';
+        }
+
+        // Render heatmap data table
+        const heatmapEl = document.getElementById('stats-heatmap');
+        if (r.data && r.data.heatmap_data && r.data.heatmap_data.length > 0) {
+            const points = r.data.heatmap_data;
+            heatmapEl.innerHTML = `
+                <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;">
+                    <h3 style="font-size:0.95rem;font-weight:700;margin-bottom:0.75rem;">&#127758; Heatmap Data (${points.length} points)</h3>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+                            <thead>
+                                <tr style="background:#f8fafc;border-bottom:2px solid var(--border);">
+                                    <th style="padding:0.5rem;text-align:left;">Latitude</th>
+                                    <th style="padding:0.5rem;text-align:left;">Longitude</th>
+                                    <th style="padding:0.5rem;text-align:left;">Count</th>
+                                    <th style="padding:0.5rem;text-align:left;">Region</th>
+                                    <th style="padding:0.5rem;text-align:left;">Map</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${points.map(p => `
+                                    <tr style="border-bottom:1px solid var(--border);">
+                                        <td style="padding:0.5rem;font-family:monospace;">${parseFloat(p.lat).toFixed(4)}</td>
+                                        <td style="padding:0.5rem;font-family:monospace;">${parseFloat(p.lon).toFixed(4)}</td>
+                                        <td style="padding:0.5rem;">
+                                            <span style="display:inline-block;background:${p.count >= 5 ? 'var(--danger)' : p.count >= 3 ? 'var(--warning)' : 'var(--info)'};
+                                                color:white;padding:0.15rem 0.5rem;border-radius:10px;font-weight:700;font-size:0.8rem;">${p.count}</span>
+                                        </td>
+                                        <td style="padding:0.5rem;">${escapeHtml(p.region || 'unknown')}</td>
+                                        <td style="padding:0.5rem;">
+                                            <a href="https://www.google.com/maps?q=${p.lat},${p.lon}" target="_blank" style="color:var(--primary);font-size:0.8rem;">&#127758; View</a>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    ${r.data.supported_regions ? `<p style="font-size:0.75rem;color:var(--text-light);margin-top:0.5rem;">
+                        Supported regions: ${r.data.supported_regions.join(', ')}</p>` : ''}
+                </div>`;
+        } else {
+            heatmapEl.innerHTML = '';
         }
     } catch (e) {
         showToast(e.message, 'error');
@@ -1258,7 +1633,7 @@ async function loadOverview() {
 
     try {
         // Health
-        const h = await apiRequest('GET', '/health');
+        const h = await apiRequest('GET', buildOperationPath('getHealth', 'GET'));
         results.health = h.data;
         if (h.data && h.data.components) {
             renderHealthCards('overview-health', h.data.components);
@@ -1267,7 +1642,7 @@ async function loadOverview() {
 
     try {
         // Stats
-        const s = await apiRequest('GET', '/reports/stats?timeframe=today');
+        const s = await apiRequest('GET', buildOperationPath('getReportStats', 'GET', {}, { timeframe: 'today' }));
         results.stats = s.data;
         if (s.data && s.data.summary) {
             const sum = s.data.summary;
@@ -1282,7 +1657,10 @@ async function loadOverview() {
 
     try {
         // Pending reports
-        const r = await apiRequest('GET', '/reports?status=PENDING_REVIEW&limit=5');
+        const r = await apiRequest('GET', buildOperationPath('listReports', 'GET', {}, {
+            status: 'PENDING_REVIEW',
+            limit: 5,
+        }));
         results.reports = r.data;
         if (r.data && r.data.data) {
             renderReportList('overview-reports', r.data.data);
@@ -1308,13 +1686,14 @@ async function fetchAuditLogs() {
     const reportId = document.getElementById('audit-report-id').value.trim();
     const limit = document.getElementById('audit-limit').value || '20';
 
-    let path = `/reports/audit?limit=${limit}`;
-    if (reportId) path += `&report_id=${encodeURIComponent(reportId)}`;
+    const path = buildOperationPath('getAuditLogs', 'GET', {}, {
+        limit,
+        report_id: reportId,
+    });
 
-    const { status, data, elapsed } = await apiRequest('GET', path);
-    updateResponseUI('audit', status, elapsed);
-    document.getElementById('audit-response').textContent = JSON.stringify(data, null, 2);
-    document.getElementById('audit-response').className = 'response-body';
+    const result = await apiRequest('GET', path);
+    updateLegacyResponseUI('audit-status', 'audit-time', 'audit-response', result);
+    const data = typeof result.data === 'object' && result.data !== null ? result.data : null;
 
     // Render timeline
     const container = document.getElementById('audit-timeline');
@@ -1343,11 +1722,10 @@ async function fetchEvents() {
     const type = document.getElementById('events-type').value;
     const limit = document.getElementById('events-limit').value || '20';
 
-    const path = `/reports/events?type=${type}&limit=${limit}`;
-    const { status, data, elapsed } = await apiRequest('GET', path);
-    updateResponseUI('events', status, elapsed);
-    document.getElementById('events-response').textContent = JSON.stringify(data, null, 2);
-    document.getElementById('events-response').className = 'response-body';
+    const path = buildOperationPath('getEventLogs', 'GET', {}, { type, limit });
+    const result = await apiRequest('GET', path);
+    updateLegacyResponseUI('events-status', 'events-time', 'events-response', result);
+    const data = typeof result.data === 'object' && result.data !== null ? result.data : null;
 
     const container = document.getElementById('events-list');
     if (data && data.data && data.data.length > 0) {
@@ -1406,20 +1784,19 @@ async function uploadMedia() {
     document.getElementById('upload-bar').style.width = '30%';
     document.getElementById('upload-status-text').textContent = 'Getting presigned URL…';
 
-    const { status, data, elapsed } = await apiRequest('POST', '/reports/upload-url', {
+    const result = await apiRequest('POST', buildOperationPath('createUploadUrl', 'POST'), {
         filename: file.name,
         content_type: file.type || 'application/octet-stream',
         report_id: reportId || undefined
     });
 
-    updateResponseUI('upload', status, elapsed);
+    updateLegacyResponseUI('upload-status', 'upload-time', 'upload-response', result);
+    const data = typeof result.data === 'object' && result.data !== null ? result.data : null;
 
-    if (status !== 200 || !data || !data.upload_url) {
+    if (result.status !== 200 || !data || !data.upload_url) {
         document.getElementById('upload-bar').style.width = '100%';
         document.getElementById('upload-bar').style.background = 'var(--danger)';
         document.getElementById('upload-status-text').textContent = 'Failed to get upload URL';
-        document.getElementById('upload-response').textContent = JSON.stringify(data, null, 2);
-        document.getElementById('upload-response').className = 'response-body';
         return;
     }
 
@@ -1465,6 +1842,108 @@ async function uploadMedia() {
         document.getElementById('upload-response').className = 'response-body';
     }
 }
+
+// =========================================
+// Changelog RSS
+// =========================================
+async function sendChangelog() {
+    try {
+        const r = await apiRequest('GET', buildOperationPath('getChangelogRss', 'GET'));
+        updateResponseUI('changelog', r);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// =========================================
+// Deprecation Info
+// =========================================
+async function sendDeprecationInfo() {
+    try {
+        const r = await apiRequest('GET', '/deprecation-info');
+        updateResponseUI('deprecation', r);
+
+        const container = document.getElementById('deprecation-info-cards');
+        if (r.data && !r.data.error) {
+            const active = r.data.active_deprecations || [];
+            const sunset = r.data.sunset_endpoints || [];
+            container.innerHTML = `
+                <div style="margin-top:1rem;">
+                    ${active.length > 0 ? `
+                    <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:1rem;margin-bottom:0.75rem;">
+                        <h3 style="font-size:0.9rem;font-weight:700;color:#92400e;margin-bottom:0.5rem;">&#9888; Active Deprecations (${active.length})</h3>
+                        ${active.map(d => `
+                            <div style="padding:0.5rem;background:white;border-radius:6px;margin-bottom:0.5rem;border:1px solid #fde68a;">
+                                <strong>${escapeHtml(d.endpoint)}</strong>
+                                <span style="font-size:0.8rem;color:#92400e;float:right;">Sunset: ${d.sunset_date}</span>
+                                <p style="font-size:0.82rem;color:var(--text-light);margin-top:0.25rem;">${escapeHtml(d.migration_guide)}</p>
+                            </div>
+                        `).join('')}
+                    </div>` : '<div style="padding:1rem;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;margin-bottom:0.75rem;"><p style="color:var(--success);font-weight:600;">&#10003; No active deprecations</p></div>'}
+                    ${sunset.length > 0 ? `
+                    <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:10px;padding:1rem;">
+                        <h3 style="font-size:0.9rem;font-weight:700;color:#991b1b;margin-bottom:0.5rem;">&#10060; Sunset Endpoints (${sunset.length})</h3>
+                        ${sunset.map(d => `<div style="padding:0.5rem;"><strong>${escapeHtml(d.endpoint)}</strong></div>`).join('')}
+                    </div>` : ''}
+                    <p style="font-size:0.8rem;color:var(--text-light);margin-top:0.75rem;">${escapeHtml(r.data.note || '')}</p>
+                </div>`;
+        } else {
+            container.innerHTML = '';
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// =========================================
+// Trace Lookup
+// =========================================
+async function sendTrace() {
+    const traceId = document.getElementById('trace-id').value.trim();
+    if (!traceId) { showToast('Please enter a Trace ID', 'error'); return; }
+
+    try {
+        const r = await apiRequest('GET', `/reports/trace/${encodeURIComponent(traceId)}`);
+        updateResponseUI('trace', r);
+
+        const container = document.getElementById('trace-results');
+        if (r.data && !r.data.error) {
+            const results = r.data.results || [];
+            const howTo = r.data.how_to_trace || {};
+            container.innerHTML = `
+                <div style="margin-top:1rem;">
+                    <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:0.75rem;">
+                        <h3 style="font-size:0.9rem;font-weight:700;margin-bottom:0.5rem;">&#128270; Trace Results (${r.data.total_log_entries || 0} entries)</h3>
+                        ${results.length > 0 ? results.map(entry => `
+                            <div style="border-left:3px solid var(--primary);padding:0.4rem 0.75rem;margin-bottom:0.4rem;background:#f8fafc;border-radius:0 6px 6px 0;">
+                                <div style="display:flex;justify-content:space-between;font-size:0.82rem;">
+                                    <span style="color:var(--primary);font-weight:600;">${escapeHtml(entry.log_group.split('/').pop())}</span>
+                                    <span style="color:var(--text-light);">${entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ''}</span>
+                                </div>
+                                <pre style="font-size:0.78rem;color:var(--text);margin:0.25rem 0 0;white-space:pre-wrap;word-break:break-word;">${escapeHtml(entry.message)}</pre>
+                            </div>
+                        `).join('') : '<p style="color:var(--text-light);">No log entries found for this trace ID</p>'}
+                    </div>
+                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:1rem;">
+                        <h3 style="font-size:0.9rem;font-weight:700;color:#065f46;margin-bottom:0.5rem;">&#128218; How to Trace</h3>
+                        <ol style="font-size:0.85rem;color:var(--text);padding-left:1.25rem;line-height:1.8;">
+                            ${Object.values(howTo).map(step => `<li>${escapeHtml(step)}</li>`).join('')}
+                        </ol>
+                        ${r.data.cloudwatch_insights_query ? `
+                        <div style="margin-top:0.5rem;padding:0.5rem;background:var(--code-bg);color:#e2e8f0;border-radius:6px;font-family:monospace;font-size:0.8rem;word-break:break-all;">
+                            ${escapeHtml(r.data.cloudwatch_insights_query)}
+                        </div>` : ''}
+                    </div>
+                </div>`;
+        } else {
+            container.innerHTML = '';
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+loadOpenApiSpec();
 </script>
 
 </body>

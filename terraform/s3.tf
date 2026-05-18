@@ -90,3 +90,19 @@ resource "aws_s3_object" "dashboard_html" {
   content_type = "text/html; charset=utf-8"
   etag         = filemd5("${path.module}/../frontend/dashboard/index.html")
 }
+
+resource "aws_s3_object" "admin_verify_html" {
+  bucket       = aws_s3_bucket.website.id
+  key          = "admin-verify/index.html"
+  source       = "${path.module}/../frontend/admin-verify/index.html"
+  content_type = "text/html; charset=utf-8"
+  etag         = filemd5("${path.module}/../frontend/admin-verify/index.html")
+}
+
+resource "aws_s3_object" "openapi_spec" {
+  bucket       = aws_s3_bucket.website.id
+  key          = "openapi.json"
+  source       = "${path.module}/../docs/openapi/openapi.json"
+  content_type = "application/json; charset=utf-8"
+  etag         = filemd5("${path.module}/../docs/openapi/openapi.json")
+}

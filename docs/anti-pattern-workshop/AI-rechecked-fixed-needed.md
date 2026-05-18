@@ -2,8 +2,6 @@
 
 > **สรุปจากการตรวจสอบ Anti-Pattern Workshop ทั้ง 4 ไฟล์**  
 > **Service:** Report Ingestion & Verification Service  
-> **Owner:** Akawat Moradsatian (6609681231)  
-> **วันที่:** 2026-04-07
 
 ---
 
@@ -327,6 +325,8 @@ These changes are safe and won't break existing consumers:
 For versioning questions or migration support:
 - **Owner**: Akawat Moradsatian
 - **Email**: akawat.m@student.chula.ac.th
+- **Owner**: Akawat Moradsatian
+- **Email**: akawar.mor@dome.tu.ac.th
 - **Slack**: #report-verify-service
 ```
 
@@ -382,52 +382,26 @@ For versioning questions or migration support:
 ## 📋 Action Items Checklist
 
 ### CRITICAL (ทำก่อน integrate กับ consumer services)
-- [ ] แก้ไข Gemini timeout enforcement (gemini_service.py line 165)
-- [ ] เพิ่ม X-Trace-Id header (response.py)
-- [ ] เพิ่ม traceId ใน error responses (response.py)
+- [x] แก้ไข Gemini timeout enforcement (gemini_service.py line 165)
+- [x] เพิ่ม X-Trace-Id header (response.py)
+- [x] เพิ่ม traceId ใน error responses (response.py)
 
 ### HIGH (ทำก่อน production deployment)
-- [ ] แก้ไขทุก handler ให้ส่ง trace_id ไปที่ response builders
-- [ ] เพิ่ม error codes (E400, E404, E500, etc.)
-- [ ] เพิ่ม timestamp ใน error responses
+- [x] แก้ไขทุก handler ให้ส่ง trace_id ไปที่ response builders
+- [x] เพิ่ม error codes (E400, E404, E500, etc.)
+- [x] เพิ่ม timestamp ใน error responses
 
 ### MEDIUM (ทำเพื่อ long-term maintainability)
-- [ ] เพิ่ม schemaVersion ใน EventBridge events (event_publisher.py)
-- [ ] สร้าง docs/VERSIONING_POLICY.md
-- [ ] Setup changelog RSS feed
+- [x] เพิ่ม schemaVersion ใน EventBridge events (event_publisher.py)
+- [x] สร้าง docs/VERSIONING_POLICY.md
+- [x] Setup changelog RSS feed
 - [ ] สร้าง staging environment สำหรับ consumer testing
 
 ### NICE TO HAVE (Optional improvements)
-- [ ] Implement X-Deprecated-Version header mechanism
+- [x] Implement X-Deprecated-Version header mechanism
 - [ ] Setup webhook notifications for breaking changes
-- [ ] Create OpenAPI 3.x specification
-- [ ] Add health check endpoint with dependency status
-
----
-
-## 🎯 Expected Timeline
-
-| Phase | Tasks | Deadline | Status |
-|---|---|---|---|
-| **Week 1** | Fix CRITICAL items (#8, #7) | 2026-04-14 | ⏳ Pending |
-| **Week 2** | Complete HIGH items | 2026-04-21 | ⏳ Pending |
-| **Week 3** | Finish MEDIUM items (#9) | 2026-04-28 | ⏳ Pending |
-| **Week 4** | Testing & Documentation | 2026-05-05 | ⏳ Pending |
-
----
-
-## 📞 Contact & Support
-
-**Service Owner:**
-- Name: Akawat Moradsatian
-- Student ID: 6609681231
-- Service: Report Ingestion & Verification Service
-
-**Reviewers:**
-- Peer Review: Pattayawat Poolsawat (Trace Missing Service)
-- Consumer Review: Tanat Kerdtip (MonitorDisaster Service)
-
----
+- [x] Create OpenAPI 3.x specification
+- [x] Add health check endpoint with dependency status
 
 ## 📚 References
 
@@ -448,9 +422,3 @@ For versioning questions or migration support:
 - [Implementation Plan](../implement/implementation-plan.md)
 - [Service Proposal](../others/reportingestion_proposal.txt)
 - [README.md](../../README.md)
-
----
-
-**Generated:** 2026-04-07  
-**Last Updated:** 2026-04-07  
-**Status:** 📝 Draft - Awaiting implementation

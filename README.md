@@ -120,6 +120,14 @@ terraform output -raw api_key
 | `DELETE` | `/v1/reports/{id}` | Soft delete a report |
 | `GET` | `/v1/reports/stats` | Aggregated statistics |
 | `GET` | `/v1/health` | System health check |
+| `GET` | `/v1/changelog.xml` | RSS feed for contract/release changes |
+
+### Query Parameters (Important)
+
+- `GET /v1/reports?priority=all|high|normal`
+  - `high` = show only high-priority reports first (trust/severity based)
+- `GET /v1/reports/stats?timeframe=today|last_24h|last_7d&region=bkk|central|north|northeast|south`
+  - `region` is optional and filters summary, trending keywords, and heatmap data
 
 ### Report Status Lifecycle
 
@@ -238,6 +246,7 @@ plan/                         # Original implementation plan
 | [📋 Implementation Plan](docs/implement/implementation-plan.md) | **แผนการ Implement ตาม Phase พร้อมสรุปสิ่งที่ทำเสร็จ/ยังขาด** |
 | [📄 Service Proposal (PDF)](docs/Service%20Proposal%206609681231%20WordVer2.pdf) | เอกสาร Proposal ฉบับเต็ม |
 | [📝 Service Proposal (Text)](docs/others/reportingestion_proposal.txt) | เอกสาร Proposal รูปแบบ Text |
+| [🧩 OpenAPI 3.0 Spec](docs/openapi/openapi.json) | Machine-readable API contract (used by dashboard) |
 | [🔧 Original Plan](plan/implementation-plan.md) | แผนการ Implement ต้นฉบับ |
 | [🔗 Integration Guide](docs/implement/integration-guide.md) | คู่มือ Integration กับ Services อื่น |
 
